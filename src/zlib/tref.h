@@ -68,7 +68,7 @@ public:
 #endif
 		DWORD_OR_UINT32T __stdcall Release()
 	{
-#ifndef __GNUC__
+#if !defined(__GNUC__) && !defined(ALLEGIANCE_NATIVE)
 		// BT - 9/17 - Hunting down mystery fedsrv crashes.
 		__try
 		{
@@ -77,7 +77,7 @@ public:
 				delete this;
 				return 0;
 			}
-#ifndef __GNUC__
+#if !defined(__GNUC__) && !defined(ALLEGIANCE_NATIVE)
 		}
 		__except (StackTracer::ExceptionFilter(GetExceptionInformation()))
 		{

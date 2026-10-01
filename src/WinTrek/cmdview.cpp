@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "cmdview.h"
+#include "../ClientCore/CommandPicking.h"
 
 #include <button.h>
 #include <controls.h>
@@ -29,13 +30,11 @@ CommandGeo::CommandGeo(float radius, float zGrid, int nSegments)
     //m_top(top)
 {
     int index = 0;
-    float radius2 = radius * radius;
 
     for (int segment = 0; segment <= nSegments; segment++) 
     {
-        float x = (((float)segment / (float)nSegments) - 0.5f) * 2.0f * radius;
-
-        float yMax = (float)sqrt(radius2 - x * x);
+        float x, yMax;
+        Allegiance::CommandGridSpan(segment, nSegments, radius, x, yMax);
         float yMin = -yMax;
 
         const Color& color = (segment%5 == 0) ? s_colorGridMajor : s_colorGrid;

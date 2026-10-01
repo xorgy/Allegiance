@@ -380,7 +380,7 @@ ZString CmissionIGC::BitsToTechsList(TechTreeBitMask & ttbm)
 
 	//use Zmask.ToString() if the new rgTechs isn't loaded
 	if(strcmp((PCC)GetTechFlagName(0),"unavailable") != 0) {
-		char  * pszTechs = new char[(c_ttbMax + 7) / 8 * 2 + 1];
+		char pszTechs[(c_ttbMax + 7) / 8 * 2 + 1];
 		ttbm.ToString(pszTechs,(c_ttbMax + 7) / 8 * 2 + 1);
 		pszTechs[100] = '\0';  //tidy
 		return ZString(pszTechs);
@@ -401,7 +401,7 @@ ZString CmissionIGC::BitsToTechsList(TechTreeBitMask & ttbm)
 	if(strList.GetLength() < 3) {
 		if (!(ttbm.GetAllZero())) {
 			//use Zmask.ToString() for an empty mask name list that isn't supposed to be
-			char  * pszTechs = new char[(c_ttbMax + 7) / 8 * 2 + 1];
+			char pszTechs[(c_ttbMax + 7) / 8 * 2 + 1];
 			ttbm.ToString(pszTechs,(c_ttbMax + 7) / 8 * 2 + 1);
 			pszTechs[100] = '\0';  //tidy
 			return ZString(pszTechs);
@@ -3015,13 +3015,13 @@ CstaticIGC::CstaticIGC(void)
 
 void TerminateStatic(CstaticIGC*  pStatic)
 {
-#ifndef __GNUC__
+#if !defined(__GNUC__) && !defined(ALLEGIANCE_NATIVE)
     // BT - 9/17 - Fixing fedsrv crashes.
 	__try
 	{
 #endif
 		pStatic->Terminate();
-#ifndef __GNUC__
+#if !defined(__GNUC__) && !defined(ALLEGIANCE_NATIVE)
     }
 	__except (StackTracer::ExceptionFilter(GetExceptionInformation()))
 	{
@@ -3041,6 +3041,30 @@ CmissionIGC::~CmissionIGC(void)
                 if ((pcl->data().consumers--) == 1)
                 {
 					// BT - 9/17 - Fixing fedsrv crashes.
+#ifdef ALLEGIANCE_NATIVE
+                    // A native process can replace its first mission while other
+                    // replicas still share this core. Static types only use their
+                    // mission pointer for initialization and removal; give them
+                    // the last live owner before they remove themselves.
+                    for (auto* l = GetTreasureSets()->first(); l; l = l->next())
+                        l->data()->NativeSetStaticOwner(this);
+                    for (auto* l = GetDroneTypes()->first(); l; l = l->next())
+                        l->data()->NativeSetStaticOwner(this);
+                    for (auto* l = GetStationTypes()->first(); l; l = l->next())
+                        l->data()->NativeSetStaticOwner(this);
+                    for (auto* l = GetHullTypes()->first(); l; l = l->next())
+                        l->data()->NativeSetStaticOwner(this);
+                    for (auto* l = GetExpendableTypes()->first(); l; l = l->next())
+                        l->data()->NativeSetStaticOwner(this);
+                    for (auto* l = GetPartTypes()->first(); l; l = l->next())
+                        l->data()->NativeSetStaticOwner(this);
+                    for (auto* l = GetProjectileTypes()->first(); l; l = l->next())
+                        l->data()->NativeSetStaticOwner(this);
+                    for (auto* l = GetDevelopments()->first(); l; l = l->next())
+                        l->data()->NativeSetStaticOwner(this);
+                    for (auto* l = GetCivilizations()->first(); l; l = l->next())
+                        l->data()->NativeSetStaticOwner(this);
+#endif
 					TerminateStatic(m_pStatic);
 
                     delete m_pStatic;
@@ -3202,8 +3226,8 @@ static int  ExportList(int64_t              maskTypes,
             {
                 int sizeItem = pbl->data()->Export(*ppdata + sizeof(int) + sizeof(ObjectType));
             
-                *((ObjectType*)*ppdata) = type;
-                *((int*)(*ppdata + sizeof(ObjectType))) = sizeItem;
+                memcpy(*ppdata, &type, sizeof(type));
+                memcpy(*ppdata + sizeof(ObjectType), &sizeItem, sizeof(sizeItem));
 
                 *ppdata += sizeItem + sizeof(int) + sizeof(ObjectType);
                 size += sizeItem + sizeof(int) + sizeof(ObjectType);
@@ -3226,8 +3250,9 @@ int                 CmissionIGC::Export(int64_t  maskTypes,
         int  size = GetSizeOfConstants();
         if (pdata)
         {
-            *((ObjectType*)pdata) = OT_constants;
-            *((int*)(pdata + sizeof(ObjectType))) = size;
+            ObjectType type = OT_constants;
+            memcpy(pdata, &type, sizeof(type));
+            memcpy(pdata + sizeof(ObjectType), &size, sizeof(size));
             memcpy(pdata + sizeof(int) + sizeof(ObjectType), GetConstants(), size);
 
             pdata += sizeof(int) + sizeof(ObjectType) + size;
@@ -3273,8 +3298,11 @@ void                CmissionIGC::Import(Time    now,
 {
     while (datasize > 0)
     {
-        ObjectType  type = *((ObjectType*)pdata);
-        int size = *((int*)(pdata + sizeof(ObjectType)));
+        // The six-byte record header need not be naturally aligned.
+        ObjectType type;
+        int size;
+        memcpy(&type, pdata, sizeof(type));
+        memcpy(&size, pdata + sizeof(ObjectType), sizeof(size));
 
         if (maskTypes & (int64_t(1) << int64_t(type)))
         {
@@ -3289,9 +3317,10 @@ void                CmissionIGC::Import(Time    now,
                 assert (b);
                 b->Release();
             }
-            pdata += size + sizeof(int) + sizeof(ObjectType);
         }
 
+        // Excluded records still occupy bytes in the stream.
+        pdata += size + sizeof(int) + sizeof(ObjectType);
         datasize -= (size + sizeof(int) + sizeof(ObjectType));
     }
 }
@@ -3387,6 +3416,10 @@ ImodelIGC*  CmissionIGC::GetModel(ObjectType type, ObjectID id) const
 {
     switch (type)
     {
+#ifdef ALLEGIANCE_NATIVE
+        case OT_missile:
+            return id==NA?NULL:m_nativeMissileIndex[uint16_t(id)];
+#endif
         case OT_station:
             return GetStation(id);
 
@@ -3539,15 +3572,25 @@ const StationListIGC* CmissionIGC::GetStations(void) const
 
 void                            CmissionIGC::AddTreasure(ItreasureIGC*  t)
 {
+#ifdef ALLEGIANCE_NATIVE
+    auto& slot=m_nativeTreasureIndex[uint16_t(t->GetObjectID())];assert(!slot || slot==t);slot=t;
+#endif
     AddIbaseIGC((BaseListIGC*)&m_treasures, t);
 }
 void                            CmissionIGC::DeleteTreasure(ItreasureIGC* t)
 {
+#ifdef ALLEGIANCE_NATIVE
+    auto& slot=m_nativeTreasureIndex[uint16_t(t->GetObjectID())];if(slot==t)slot=nullptr;
+#endif
     DeleteIbaseIGC((BaseListIGC*)&m_treasures, t);
 }
 ItreasureIGC*                   CmissionIGC::GetTreasure(TreasureID  id) const
 {
+#ifdef ALLEGIANCE_NATIVE
+    return m_nativeTreasureIndex[uint16_t(id)];
+#else
     return (ItreasureIGC*)GetIbaseIGC((BaseListIGC*)&m_treasures, id);
+#endif
 }
 const TreasureListIGC*    CmissionIGC::GetTreasures(void) const
 {
@@ -3699,14 +3742,23 @@ const ClusterListIGC*       CmissionIGC::GetClusters(void) const
 
 void                        CmissionIGC::AddShip(IshipIGC*    s)
 {
+#ifdef ALLEGIANCE_NATIVE
+    if(s->GetObjectID()>=0){m_reservedShipIDs.set(s->GetObjectID());m_nativeShipIndex[s->GetObjectID()]=s;}
+#endif
     AddIbaseIGC((BaseListIGC*)&m_ships, s);
 }
 void                        CmissionIGC::DeleteShip(IshipIGC* s)
 {
+#ifdef ALLEGIANCE_NATIVE
+    if(s->GetObjectID()>=0){m_reservedShipIDs.reset(s->GetObjectID());if(m_nativeShipIndex[s->GetObjectID()]==s)m_nativeShipIndex[s->GetObjectID()]=nullptr;}
+#endif
     DeleteIbaseIGC((BaseListIGC*)&m_ships, s);
 }
 IshipIGC*                   CmissionIGC::GetShip(ShipID   id) const
 {
+#ifdef ALLEGIANCE_NATIVE
+    if(id>=0)return m_nativeShipIndex[id];
+#endif
     return (IshipIGC*)GetIbaseIGC((BaseListIGC*)&m_ships, id);
 }
 const ShipListIGC*          CmissionIGC::GetShips(void) const
@@ -3834,6 +3886,9 @@ void                    CmissionIGC::GenerateMission(Time                   now,
 {
     m_nextBuoyID = 0;
     m_nextShipID = 0;
+#ifdef ALLEGIANCE_NATIVE
+    m_reservedShipIDs.reset();for(auto* l=m_ships.first();l;l=l->next())if(l->data()->GetObjectID()>=0)m_reservedShipIDs.set(l->data()->GetObjectID());
+#endif
     m_nextAsteroidID = 0;
     m_nextTreasureID = 0;
     m_nextMineID = 0;

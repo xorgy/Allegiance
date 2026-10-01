@@ -1,4 +1,6 @@
 #include "pch.h"
+#include "../ClientCore/EquipmentStatus.h"
+#include "../ClientCore/InventoryHud.h"
 #include "consoledata.h"
 
 /////////////////////////////////////////////////////////////////////////////
@@ -689,126 +691,22 @@ ZString PartWrapper::GetPartName()
 
 float PartWrapper::GetRange()
 {
-    if (!m_ppart)
-        return 0;
-
-    EquipmentType et = m_ppart->GetPartType()->GetEquipmentType();
-
-    if (et == ET_Weapon)
-    {
-        IprojectileTypeIGC* ppt = ((IweaponIGC*)(IpartIGC*)m_ppart)->GetProjectileType();
-        float               range = ppt->GetSpeed()*ppt->GetLifespan();
-
-        const GlobalAttributeSet&   ga = trekClient.GetSide()->GetGlobalAttributeSet();
-        range *= ga.GetAttribute((((IweaponIGC*)(IpartIGC*)m_ppart)->GetAmmoPerShot())
-                                 ? c_gaSpeedAmmo
-                                 : c_gaLifespanEnergy);
-
-        return range;
-    }
-    else if (et == ET_Magazine)
-    {
-        ImissileTypeIGC* pmt = (ImissileTypeIGC*)((IlauncherTypeIGC*)m_ppart->GetPartType())->GetExpendableType();
-        float range = pmt->GetLifespan()*(pmt->GetInitialSpeed()+0.5f*pmt->GetLifespan()*pmt->GetAcceleration());
-        return range;
-    }
-    else
-    {
-        ZAssert(false);
-        return 0;
-    }
+    return Allegiance::InventoryWeaponRange(m_ppart, trekClient.GetShip());
 }
 
 float PartWrapper::GetDamage()
 {
-    if (!m_ppart)
-        return 0;
-
-    EquipmentType et = m_ppart->GetPartType()->GetEquipmentType();
-
-    const GlobalAttributeSet&   ga = trekClient.GetSide()->GetGlobalAttributeSet();
-
-    if (et == ET_Weapon)
-    {
-        IprojectileTypeIGC* ppt = ((IweaponIGC*)(IpartIGC*)m_ppart)->GetProjectileType();
-        return (ppt->GetPower() + ppt->GetBlastPower()) * ga.GetAttribute(c_gaDamageGuns);
-    }
-    else if (et == ET_Magazine)
-    {
-        ImissileTypeIGC* pmt = (ImissileTypeIGC*)((IlauncherTypeIGC*)m_ppart->GetPartType())->GetExpendableType();
-        return (pmt->GetPower() + pmt->GetBlastPower()) * ga.GetAttribute(c_gaDamageMissiles);
-    }
-    else
-    {
-        ZAssert(false);
-        return 0;
-    }
+    return Allegiance::InventoryPartDamage(m_ppart, trekClient.GetShip());
 }
 
 float PartWrapper::GetRate()
 {
-	if (!m_ppart)
-        return 0;
-
-	EquipmentType et = m_ppart->GetPartType()->GetEquipmentType();
-
-	if (et == ET_Weapon)
-    {
-        DataWeaponTypeIGC*  pdwt = (DataWeaponTypeIGC*)((IpartTypeIGC*)m_ppart->GetPartType())->GetData();
-        return (1.0f /pdwt->dtimeBurst);
-    }
-    
-    else
-    {
-        ZAssert(false);
-        return 0;
-    }
+    return Allegiance::InventoryWeaponRate(m_ppart);
 }
 
 float PartWrapper::GetCount()
 {
-    if (!m_ppart)
-        return 0;
-    else
-    {
-        ObjectType ot = m_ppart->GetObjectType();
-        if (m_ppart->GetShip() && m_ppart->GetMountID() < 0)
-        {
-            float fCount = 0.0f;
-            
-            IpartTypeIGC *ppartType = m_ppart->GetPartType();
-            
-            // add up all of the instances of this in the cargo
-            for (Mount mount = -1; mount >= -c_maxCargo; --mount)
-            {
-                IpartIGC* ppart = m_ppart->GetShip()->GetMountedPart(NA, mount);
-
-                if (ppart && ppart->GetPartType() == ppartType)
-                {
-                    fCount += ppart->GetAmount();
-                }
-            }
-
-            if (m_ppart->GetObjectType() == OT_pack)
-            {
-                IpackIGC*   p = (IpackIGC*)(IpartIGC*)m_ppart;
-                const IhullTypeIGC *pht = m_ppart->GetShip()->GetHullType();
-
-                if (pht && p->GetPackType() == c_packAmmo)
-                {
-                    fCount /= pht->GetMaxAmmo();
-                }
-                else
-                {
-                    fCount /= pht->GetMaxFuel();
-                }
-            }
-
-            return fCount;
-        }
-        else
-            return (float)(m_ppart->GetAmount());
-    }
+    return Allegiance::InventoryPartCount(m_ppart);
 }
 
 float PartWrapper::GetAfterburnerFuelConsumption()
@@ -847,48 +745,12 @@ float PartWrapper::GetAfterburnerFuelLeft()
 
 float PartWrapper::GetAfterburnerTopSpeed()
 {
-    if (!m_ppart)
-        return 0;
-    else if (m_ppart->GetPartType()->GetEquipmentType() == ET_Afterburner)
-    {
-        IafterburnerIGC* pa = (IafterburnerIGC*)(IpartIGC*)m_ppart;
-        const IhullTypeIGC* pht = trekClient.GetShip()->GetSourceShip()->GetHullType();
-        
-        float maxAfterburnerThrust = pa->GetMaxThrustWithGA(); //TheRock 15-8-2009
-        float thrust = pht->GetThrust();
-
-        return pht->GetMaxSpeed() * (1.0f + (maxAfterburnerThrust / thrust));
-    }
-    else
-    {
-        ZAssert(false);
-        return 0;
-    }
+    return Allegiance::InventoryAfterburnerTopSpeed(m_ppart, trekClient.GetShip());
 }
 
 float PartWrapper::GetAfterburnerTimeLeft()
 {
-    if (!m_ppart)
-        return 0;
-    else if (m_ppart->GetPartType()->GetEquipmentType() == ET_Afterburner)
-	{
-		IafterburnerIGC* pa = (IafterburnerIGC*)(IpartIGC*)m_ppart;
-		const IhullTypeIGC* pht = trekClient.GetShip()->GetSourceShip()->GetHullType();	
-				
-		float fuel = trekClient.GetShip()->GetFuel();
-		float fuelConsumption = pa->GetFuelConsumption();
-
-		if (fuelConsumption <= 0){
-			return -1.0f;
-		}
-		else
-			return fuel / (fuelConsumption * pa->GetMaxThrust());
-	}
-	else
-    {
-        ZAssert(false);
-        return 0;
-    }
+    return Allegiance::InventoryAfterburnerTimeLeft(m_ppart, trekClient.GetShip());
 }
 
 float PartWrapper::GetMaxShieldStrength()
@@ -910,20 +772,7 @@ float PartWrapper::GetMaxShieldStrength()
 
 float PartWrapper::GetShieldStrength()
 {
-	float   f = 0.0f;
-    if (!m_ppart)
-        return 0;
-    else if (m_ppart->GetPartType()->GetEquipmentType() == ET_Shield)
-    {
-        IshieldIGC* pshield = (IshieldIGC*)(IpartIGC*)m_ppart;           
-		f = pshield->GetFraction();
-		return f * pshield->GetMaxStrength();
-	}
-	else
-    {
-        ZAssert(false);
-        return 0;
-    }
+    return Allegiance::InventoryShieldStrength(m_ppart);
 }
 
 float PartWrapper::GetRegenRate()
@@ -944,50 +793,12 @@ float PartWrapper::GetRegenRate()
 
 float PartWrapper::GetRechargeTime()
 {
-	float   f = 0.0f;
-	float MaxHP = 0.0f;
-	float HP = 0.0f;
-    if (!m_ppart)
-        return 0;
-    else if (m_ppart->GetPartType()->GetEquipmentType() == ET_Shield)
-    {
-        IshieldIGC* pshield = (IshieldIGC*)(IpartIGC*)m_ppart; 
-		MaxHP = pshield->GetMaxStrength();
-		f = pshield->GetFraction();
-		HP = f * pshield->GetMaxStrength();
-		return (MaxHP - HP) / pshield->GetRegeneration();
-	}
-	else
-    {
-        ZAssert(false);
-        return 0;
-    }
+    return Allegiance::InventoryShieldRechargeTime(m_ppart);
 }
 		
 float PartWrapper::GetCloakTimeLeft()
-{	
-	if (!m_ppart)
-        return 0;
-    else if (m_ppart->GetPartType()->GetEquipmentType() == ET_Cloak)
-	{
-		const IhullTypeIGC* pht = trekClient.GetShip()->GetSourceShip()->GetHullType();	
-		IcloakIGC* pcloak = (IcloakIGC*)(IpartIGC*)m_ppart;
-		
-		float shipEnergy = trekClient.GetShip()->GetEnergy();
-		float shipEnergyGen = pht->GetRechargeRate();
-		float cloakConsumption = pcloak->GetEnergyConsumption();
-
-		if (cloakConsumption <= shipEnergyGen){
-			return -1.0f;
-		}
-		else
-			return shipEnergy/(cloakConsumption - shipEnergyGen);
-	}
-	else
-    {
-        ZAssert(false);
-        return 0;
-    }
+{
+    return Allegiance::InventoryCloakTimeLeft(m_ppart, trekClient.GetShip());
 }
  
 
@@ -1131,47 +942,13 @@ float PartWrapper::IsActive()
 
 float PartWrapper::IsOutOfAmmo()
 {
-    if (!m_ppart)
-        return 0.0f;
-    
-    ObjectType type = m_ppart->GetObjectType();
-
-    if (type == OT_weapon)
-    {
-        return (m_ppart->GetShip()->GetAmmo() == 0) ? 1.0f : 0.0f;
-    }
-    else if (type == OT_afterburner)
-    {
-        return (m_ppart->GetShip()->GetFuel() == 0) ? 1.0f : 0.0f;
-    }
-    else if (IlauncherIGC::IsLauncher(type))
-    {        
-        return (m_ppart->GetAmount() == 0) ? 1.0f : 0.0f;
-    }
-    else 
-    {        
-        return 0.0f;
-    }
+    return Allegiance::InventoryOutOfAmmo(m_ppart);
 }
 
 float PartWrapper::GetReadyState()
 {
-    if (!m_ppart || m_ppart->GetMountID() < 0)
-        return 0;
-    else if (m_ppart->GetMountedFraction() < 1.0f)
-    {        
-        return 1;
-    }
-    else if (IlauncherIGC::IsLauncher(m_ppart->GetObjectType())
-        && ((IlauncherIGC*)(IpartIGC*)m_ppart)->GetArmedFraction() < 1.0f)
-    {
-        return 2;
-    }
-    else 
-    {
-        // ready to rock and roll
-        return 3;
-    }
+    return float(Allegiance::EquipmentReadyState(m_ppart,
+        [](IlauncherIGC* launcher) { return launcher->GetArmedFraction(); }));
 }
 
 float PartWrapper::GetMountedFraction()

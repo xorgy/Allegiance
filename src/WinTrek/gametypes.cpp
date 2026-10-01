@@ -1,5 +1,7 @@
 #include "pch.h"
 #include "gametypes.h"
+#include "../ClientCore/GameTypes.h"
+static_assert(c_cUnlimitedLives==32767 && c_mmHiLo==8 && c_mmBrawl==6 && c_mmPinWheel==2 && c_mmGrid==12, "Shared game presets must use the IGC identifiers");
 
 class GameTypeImpl : public GameType
 {
@@ -60,20 +62,12 @@ public:
 
     virtual bool IsGameType(const MissionParams& misparams)
     {
-        return (misparams.bAllowDevelopments == m_bAllowDevelopments)
-            && (misparams.bInvulnerableStations == m_bInvulnerableStations)
-            && (misparams.bEjectPods == m_bEjectPods)
-            && ((misparams.iLives == c_cUnlimitedLives) == (m_nLives == c_cUnlimitedLives))
-            && ((misparams.fGoalTeamMoney == 0) == (m_fGoalTeamMoney == 0))
-            && ((misparams.iGoalConquestPercentage == 0) == (m_iGoalConquestPercentage == 0))
-            && ((misparams.nGoalFlagsCount == 0) == (m_nGoalFlagsCount == 0))
-            && ((misparams.nGoalArtifactsCount == 0) == (m_nGoalArtifactsCount == 0))
-            && ((misparams.nGoalTeamKills == 0) == (m_nGoalTeamKills == 0))
-            && ((misparams.iGoalTerritoryPercentage == 100) == (m_nGoalTerritory == 100))
-            && ((misparams.dtGameLength == 0) == (m_fGameLength == 0))
-			&& (misparams.bExperimental == m_bExperimental)  // mmf 11/07 Experimental game type
-            //&& (misparams.bScoresCount == trekClient.GetIsZoneClub())
-            ;
+        return Allegiance::MatchesGameType(
+            {misparams.bAllowDevelopments,misparams.bInvulnerableStations,misparams.bEjectPods,misparams.iLives,
+             misparams.fGoalTeamMoney,misparams.iGoalConquestPercentage,misparams.nGoalFlagsCount,misparams.nGoalArtifactsCount,
+             misparams.nGoalTeamKills,misparams.iGoalTerritoryPercentage,misparams.dtGameLength,misparams.bExperimental},
+            {m_bAllowDevelopments,m_bInvulnerableStations,m_bEjectPods,m_nLives,m_fGoalTeamMoney,m_iGoalConquestPercentage,
+             m_nGoalFlagsCount,m_nGoalArtifactsCount,m_nGoalTeamKills,m_nGoalTerritory,m_fGameLength,m_bExperimental});
 
         // note: allow any map type.
     };
@@ -108,37 +102,14 @@ namespace
         TRef<GameType> pNewGameType;
         if (!bGameTypesInitialized)
         {
-			// mmf 10/07 if this list changes see Experimental game type comment in newgamescreen.cpp
-            pNewGameType = new GameTypeImpl(
-                "Conquest", true, false, true, c_cUnlimitedLives, 0, 100, 0, 0, 0, 100, 0, false, c_mmHiLo
-                ); // mmf 10/07 added false experimental param
-            listGameTypes.PushEnd(pNewGameType);
-
-            pNewGameType = new GameTypeImpl(
-                "Death Match", false, true, false, c_cUnlimitedLives, 0, 0, 0, 0, 20, 100, 0, false, c_mmBrawl
-                ); // mmf 10/07 added false experimental param
-            listGameTypes.PushEnd(pNewGameType);
-
-            pNewGameType = new GameTypeImpl(
-                "Capture the Flag", false, true, true, c_cUnlimitedLives, 0, 0, 10, 0, 0, 100, 0, false, c_mmHiLo
-                ); // mmf 10/07 added false experimental param
-            listGameTypes.PushEnd(pNewGameType);
-
-            pNewGameType = new GameTypeImpl(
-                "Artifacts", true, false, true, c_cUnlimitedLives, 0, 0, 0, 10, 0, 100, 0, false, c_mmPinWheel
-                ); // mmf 10/07 added false experimental param
-            listGameTypes.PushEnd(pNewGameType);
-
-            pNewGameType = new GameTypeImpl(
-                "Territorial", true, false, true, c_cUnlimitedLives, 0, 0, 0, 0, 0, 70, 0, false, c_mmGrid
-                ); // mmf 10/07 added false experimental param
-            listGameTypes.PushEnd(pNewGameType);
-
-			// mmf 10/07 add new game type for trying things on the live servers 
-            pNewGameType = new GameTypeImpl(
-                "Experimental", true, false, true, c_cUnlimitedLives, 0, 100, 0, 0, 0, 100, 0, true, c_mmHiLo
-                ); // mmf 10/07 added true experimental param
-            listGameTypes.PushEnd(pNewGameType);
+            for (const auto& type : Allegiance::GameTypes)
+            {
+                const auto& v = type.values;
+                pNewGameType = new GameTypeImpl(type.name, v.developments, v.invulnerableStations, v.ejectPods,
+                    v.lives, v.prosperity, v.conquest, v.flags, v.artifacts, v.kills, v.territory, v.seconds,
+                    v.experimental, type.map);
+                listGameTypes.PushEnd(pNewGameType);
+            }
 
             bGameTypesInitialized = true;
         }

@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "badwords.h"
+#include "../ClientCore/GameListPresentation.h"
 
 #include <button.h>
 #include <controls.h>
@@ -217,17 +218,7 @@ private:
             if (game->InProgress() || game->CountdownStarted())
             {
                 int nSecondsPlayed = (int)(Time::Now() - game->GetMissionParams().timeStart);
-                int nHours = nSecondsPlayed / (60 * 60);
-                int nMinutes = nSecondsPlayed / 60 - nHours * 60;
-
-                if (nSecondsPlayed < 0 && game->CountdownStarted())
-                    wsprintf(cbTemp, "-%d:%02d", -nHours, -nMinutes);
-                else if (nSecondsPlayed < -100 || nHours > 99)
-                    wsprintf(cbTemp, "days");
-                else if (nSecondsPlayed < 0)
-                    wsprintf(cbTemp, "0:00");
-                else
-                    wsprintf(cbTemp, "%d:%02d", nHours, nMinutes);
+                Allegiance::FormatGameListTime(cbTemp, sizeof(cbTemp), nSecondsPlayed, game->CountdownStarted());
 
                 psurface->DrawString(pfont, color,
                     WinPoint(m_viColumns[2] - pfont->GetTextExtent(cbTemp).X() - 5, 6),

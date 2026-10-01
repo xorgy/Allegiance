@@ -13,6 +13,10 @@
 */
 // weaponIGC.cpp : Implementation of CweaponIGC
 #include "weaponIGC.h"
+#ifdef ALLEGIANCE_NATIVE
+#include "simulationrandom.h"
+#include <optional>
+#endif
 
 /////////////////////////////////////////////////////////////////////////////
 // CweaponIGC
@@ -252,6 +256,14 @@ void        CweaponIGC::FireWeapon(Time now)
                         m_nextFire += (m_typeData->energyPerShot - (energy + energyDeficit)) / rechargeRate;
                     }
 
+#ifdef ALLEGIANCE_NATIVE
+                    auto* nativeSite=m_pMission->GetIgcSite();
+                    const int nativeMode=nativeSite->NativePredictionMode();
+                    uint64_t nativeShot=nativeMode?nativeSite->NativeShot(m_ship,m_mountID,++m_nativeShots):0;
+                    uint32_t nativeSeed=uint32_t(nativeShot)^uint32_t(nativeShot>>32);
+                    std::optional<Allegiance::SimulationRandomScope> nativeRandom;
+                    if(nativeMode)nativeRandom.emplace(nativeSeed);
+#endif
                     //Permute the "forward" direction slightly by a random amount
                     dataProjectile.forward = pMyOrientation->GetForward();
                     if (m_typeData->dispersion != 0.0f)
@@ -287,10 +299,17 @@ void        CweaponIGC::FireWeapon(Time now)
                         }
                     }
 
-                    IprojectileIGC*  p = (IprojectileIGC*)(m_pMission->CreateObject(m_nextFire, OT_projectile, 
+                    IprojectileIGC* p =
+#ifdef ALLEGIANCE_NATIVE
+                        (nativeMode==3 || (nativeShot && nativeSite->NativeShotExists(nativeShot)))?nullptr:
+#endif
+                        (IprojectileIGC*)(m_pMission->CreateObject(m_nextFire, OT_projectile,
                                                                                     &dataProjectile, sizeof(dataProjectile)));
                     if (p)
                     {
+#ifdef ALLEGIANCE_NATIVE
+                        if(nativeShot)nativeSite->NativeProjectileCreated(p,nativeShot);
+#endif
                         if (m_pshipGunner)
                             p->SetGunner(m_pshipGunner);
                         else

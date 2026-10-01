@@ -17,6 +17,10 @@
 #define __CLUSTERIGC_H_
 
 #include "igc.h"
+#ifdef ALLEGIANCE_NATIVE
+#include "../native/dodge_index.hpp"
+#include <unordered_map>
+#endif
 
 const int   c_maxExplosions = 20;
 const int   c_nPassesPerUpdate = 10;
@@ -33,7 +37,8 @@ class       CclusterIGC : public IclusterIGC
             m_kdrStatic(true),
             m_kdrMoving(false),
             m_collisionID(0),
-            m_fPendingTreasures(0.0f)
+            m_fPendingTreasures(0.0f),
+            m_fCost(0.0f)
         {
         }
 
@@ -73,6 +78,55 @@ class       CclusterIGC : public IclusterIGC
             m_lastUpdate = now;
         }
 
+#ifdef ALLEGIANCE_NATIVE
+        friend class NativeScaleCollisionReference;
+        std::vector<KDroot::NativeCast> m_nativeRays;
+        KDroot::NativeCandidates m_nativeStaticCandidates,m_nativeMovingCandidates;
+        NativeDodgeIndex m_dodgeIndex,m_shipDodgeIndex;
+        bool m_nativeFullVisibilityScan{};
+        void RequireFullVisibilityScan() override {m_nativeFullVisibilityScan=true;}
+        std::array<double,10> m_nativeProfile{};
+        struct NativeModelLinks {
+            std::array<ModelLinkIGC*,3> links;uint32_t handle;
+            ModelLinkIGC*& operator[](int slot){return links[slot];}
+        };
+        std::unordered_map<ImodelIGC*,NativeModelLinks> m_modelLinks;
+        // Append order is the reverse of m_models. Handles survive dense
+        // compaction; removals null slots before releasing any model refs.
+        std::vector<ImodelIGC*> m_nativeModels;
+        std::vector<uint32_t> m_nativeModelHandles,m_nativeModelPositions,m_nativeFreeModelHandles;
+        std::vector<ObjectType> m_nativeModelTypes;
+        size_t m_nativeModelHoles{};
+        uint32_t AddNativeModel(ImodelIGC* model){
+            uint32_t handle;
+            if(m_nativeFreeModelHandles.empty()){handle=uint32_t(m_nativeModelPositions.size());m_nativeModelPositions.push_back(0);}
+            else{handle=m_nativeFreeModelHandles.back();m_nativeFreeModelHandles.pop_back();}
+            m_nativeModelPositions[handle]=uint32_t(m_nativeModels.size());
+            m_nativeModels.push_back(model);m_nativeModelHandles.push_back(handle);m_nativeModelTypes.push_back(model->GetObjectType());return handle;
+        }
+        void DeleteNativeModel(ImodelIGC* model){
+            auto found=m_modelLinks.find(model);assert(found!=m_modelLinks.end());
+            auto handle=found->second.handle;auto position=m_nativeModelPositions[handle];assert(m_nativeModels[position]==model);
+            m_nativeModels[position]=nullptr;++m_nativeModelHoles;m_nativeFreeModelHandles.push_back(handle);
+        }
+        void CompactNativeModels(){
+            if(!m_nativeModelHoles || m_nativeModelHoles<m_nativeModels.size()/4)return;
+            size_t destination=0;
+            for(size_t source=0;source<m_nativeModels.size();++source)if(auto* model=m_nativeModels[source]){
+                auto handle=m_nativeModelHandles[source];m_nativeModels[destination]=model;m_nativeModelHandles[destination]=handle;
+                m_nativeModelTypes[destination]=m_nativeModelTypes[source];m_nativeModelPositions[handle]=uint32_t(destination++);
+            }
+            m_nativeModels.resize(destination);m_nativeModelHandles.resize(destination);m_nativeModelTypes.resize(destination);m_nativeModelHoles=0;
+        }
+        void RemoveModelLink(ModelListIGC* list,ImodelIGC* model,int slot) {
+            auto found=m_modelLinks.find(model);
+            if(found!=m_modelLinks.end()) {auto*& link=found->second[slot];if(link){assert(link->list()==list);delete link;link=nullptr;model->Release();}}
+            else DeleteIbaseIGC((BaseListIGC*)list,model);
+        }
+        const std::vector<ImodelIGC*>* GetDodgeCandidates(IshipIGC* ship,float tMax,bool shipsOnly=false) override {return shipsOnly?m_shipDodgeIndex.candidates((const ModelListIGC*)&m_ships,ship,tMax):m_dodgeIndex.candidates(&m_modelsPickable,ship,tMax);}
+        const std::vector<ImodelIGC*>* GetPathCandidates(IshipIGC* ship,const Vector& goal,float margin) override {return m_dodgeIndex.pathCandidates(&m_modelsPickable,ship,goal,margin);}
+        void InvalidateDodgeIndex() override {m_dodgeIndex.invalidate();m_shipDodgeIndex.invalidate();if(m_pClusterSite)m_pClusterSite->InvalidateVisibilityIndex();}
+#endif
         virtual void                    AddModel(ImodelIGC* modelNew);
         virtual void                    DeleteModel(ImodelIGC* modelOld);
 
@@ -420,7 +474,11 @@ class       CclusterIGC : public IclusterIGC
             assert (pmodel->GetAttributes() & c_mtStatic);
             assert ((pmodel->GetAttributes() & c_mtCastRay) == 0);
 
+#ifdef ALLEGIANCE_NATIVE
+            RemoveModelLink(&m_modelsCastRay,pmodel,2);
+#else
             DeleteIbaseIGC((BaseListIGC*)&m_modelsCastRay, pmodel);
+#endif
 
             m_kdrStatic.addHitTest(ht);
         }
@@ -437,11 +495,26 @@ class       CclusterIGC : public IclusterIGC
             assert ((pmodel->GetAttributes() & c_mtHitable) == 0);
             assert ((pmodel->GetAttributes() & c_mtCastRay) == 0);
 
+#ifdef ALLEGIANCE_NATIVE
+            RemoveModelLink(&m_modelsCastRay,pmodel,2);
+#else
             DeleteIbaseIGC((BaseListIGC*)&m_modelsCastRay, pmodel);
+#endif
         }
 
         virtual void             FreeThingSite(ModelAttributes  ma, ImodelIGC*   pmodel, HitTest* pht)
         {
+#ifdef ALLEGIANCE_NATIVE
+            // SetBaseHullType already removed the model before replacing its
+            // site. Do not retire its hit test twice or search the now-unrelated
+            // pickable/ray lists for links which DeleteModel already removed.
+            if(m_modelLinks.find(pmodel)==m_modelLinks.end())return;
+            // Reloading while still in the sector can temporarily remove a
+            // side-tracked model from the pickable list. Keep full scans for
+            // such sectors rather than relying on the ordinary subset rule.
+            if(ma&c_mtSeenBySide)RequireFullVisibilityScan();
+            InvalidateDodgeIndex();
+#endif
             if (ma & c_mtHitable)
             {
                 assert ((ma & c_mtStatic) == 0);
@@ -450,12 +523,20 @@ class       CclusterIGC : public IclusterIGC
 
             if ((ma & c_mtNotPickable) == 0)
             {
-                DeleteIbaseIGC((BaseListIGC*)&m_modelsPickable, pmodel);
+    #ifdef ALLEGIANCE_NATIVE
+            RemoveModelLink(&m_modelsPickable,pmodel,1);
+#else
+            DeleteIbaseIGC((BaseListIGC*)&m_modelsPickable, pmodel);
+#endif
             }
 
             if (ma & c_mtCastRay)
             {
-                DeleteIbaseIGC((BaseListIGC*)&m_modelsCastRay, pmodel);
+    #ifdef ALLEGIANCE_NATIVE
+            RemoveModelLink(&m_modelsCastRay,pmodel,2);
+#else
+            DeleteIbaseIGC((BaseListIGC*)&m_modelsCastRay, pmodel);
+#endif
             }
         }
 

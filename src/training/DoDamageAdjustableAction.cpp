@@ -30,7 +30,7 @@ namespace Training
     {
 		IshipIGC*	pShip = trekClient.GetCore()->GetShip(m_shipID);
 
-		pShip->ReceiveDamage (c_dmgidCollision, m_amount, Time::Now (), Vector (-1.0f, 0.0f, 0.0f), Vector (1.0f, 0.0f, 0.0f), 0);
+		pShip->ReceiveDamage (c_dmgidCollision, m_amount, Clock::Now (), Vector (-1.0f, 0.0f, 0.0f), Vector (1.0f, 0.0f, 0.0f), 0);
 
 		pShip->SetStateBits(weaponsMaskIGC | buttonsMaskIGC, allWeaponsIGC);
 		ControlData controls;

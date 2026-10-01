@@ -38,6 +38,7 @@ namespace Training
     void        CreateProbeAction::Execute (void)
     {
         ImissionIGC*    pMission = trekClient.GetCore();
+        m_probeData = {};
         m_probeData.p0 = m_position;
         m_probeData.time0 = pMission->GetLastUpdate();
         m_probeData.probeID = m_probeID;

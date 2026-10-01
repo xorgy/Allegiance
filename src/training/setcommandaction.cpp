@@ -11,9 +11,9 @@
 **  History:
 */
 #include    "pch.h"
-#include    "SetCommandAction.h"
+#include    "setcommandaction.h"
 #include    "TypeIDTarget.h"
-#include    "TrainingMission.h"
+#include    "trainingmission.h"
 
 namespace Training
 {

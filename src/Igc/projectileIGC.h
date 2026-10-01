@@ -19,9 +19,38 @@
 #include "igc.h"
 #include "modelIGC.h"
 
-class CprojectileIGC : public TmodelIGC<IprojectileIGC>
+class CprojectileIGC
+#ifdef ALLEGIANCE_NATIVE
+// The native factory uses this concrete class directly; seal its vtable so
+// original simulation methods can inline their own getters.
+final
+#endif
+: public TmodelIGC<IprojectileIGC>
 {
     public:
+#ifdef ALLEGIANCE_NATIVE
+        static void* operator new(size_t);
+        static void operator delete(void*) noexcept;
+        Time NativeExpireTime() const { return m_timeExpire; }
+        void NativeSetExpireTime(Time time) { m_timeExpire=time;++m_nativeCaptureRevision; }
+        uint64_t NativeShot() const { return m_nativeShot; }
+        void NativeSetShot(uint64_t shot) { m_nativeShot=shot;++m_nativeCaptureRevision; }
+        uint64_t NativeCaptureRevision() const { return m_nativeCaptureRevision; }
+        void SetVelocity(const Vector& value) override { TmodelIGC<IprojectileIGC>::SetVelocity(value);++m_nativeCaptureRevision; }
+        void SetRotation(const Rotation& value) override { TmodelIGC<IprojectileIGC>::SetRotation(value);++m_nativeCaptureRevision; }
+        void SetRadius(float value) override { TmodelIGC<IprojectileIGC>::SetRadius(value);++m_nativeCaptureRevision; }
+        void SetSignature(float value) override { TmodelIGC<IprojectileIGC>::SetSignature(value);++m_nativeCaptureRevision; }
+        void ChangeSignature(float value) override { TmodelIGC<IprojectileIGC>::ChangeSignature(value);++m_nativeCaptureRevision; }
+        void SetSide(IsideIGC* value) override { TmodelIGC<IprojectileIGC>::SetSide(value);++m_nativeCaptureRevision; }
+        struct NativeTrajectory { Vector position, forward, up; Time time; };
+        const NativeTrajectory& NativeTrajectoryAnchor() {
+            if(!m_nativeTrajectoryValid) {
+                m_nativeTrajectory={GetPosition(),GetOrientation().GetForward(),GetOrientation().GetUp(),GetLastUpdate()};
+                m_nativeTrajectoryValid=true;
+            }
+            return m_nativeTrajectory;
+        }
+#endif
         CprojectileIGC(void);
         ~CprojectileIGC(void);
 
@@ -40,6 +69,9 @@ class CprojectileIGC : public TmodelIGC<IprojectileIGC>
     // ImodelIGC
         virtual void                SetCluster(IclusterIGC* cluster)
         {
+#ifdef ALLEGIANCE_NATIVE
+            ++m_nativeCaptureRevision;
+#endif
             AddRef();
 
             {
@@ -98,6 +130,12 @@ class CprojectileIGC : public TmodelIGC<IprojectileIGC>
         ImodelIGC*          m_launcher;
         ExplosionData*      m_pExplosionData;
         Time                m_timeExpire;
+#ifdef ALLEGIANCE_NATIVE
+        uint64_t m_nativeShot{};
+        uint64_t m_nativeCaptureRevision{1};
+        NativeTrajectory m_nativeTrajectory{};
+        bool m_nativeTrajectoryValid{};
+#endif
 };
 
 #endif //__PROJECTILEIGC_H_

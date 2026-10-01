@@ -189,13 +189,13 @@ public:
 
         void InsertBefore(const TValue& value)
         {
-            m_list.InsertBeforeImpl(m_pnode, new ListNodeImpl(value, NULL, NULL));
+            static_cast<TList&>(m_list).InsertBeforeImpl(m_pnode, new ListNode(value, NULL, NULL));
             ((TList<TValue, EqualsFunctionType, CompareFunctionType, SinkFunctionType>&)m_list).GetSink()();
         }
 
         void InsertAfter(TValue& value)
         {
-            m_list.InsertAfterImpl(m_pnode, new ListNodeImpl(value, NULL, NULL));
+            static_cast<TList&>(m_list).InsertAfterImpl(m_pnode, new ListNode(value, NULL, NULL));
             ((TList<TValue, EqualsFunctionType, CompareFunctionType, SinkFunctionType>&)m_list).GetSink()();
         }
     };

@@ -18,7 +18,7 @@
 #endif  //_GET_SHIP_IS_DAMAGED_CONDITION_H_
 
 #ifndef _NOT_CONDITION_H_
-#include "NotCondition.h"
+#include "notcondition.h"
 #endif  //_NOT_CONDITION_H_
 
 namespace Training

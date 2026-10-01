@@ -11,7 +11,7 @@
 **  History:
 */
 #include    "pch.h"
-#include    "PeriodicCondition.h"
+#include    "periodiccondition.h"
 
 namespace Training
 {
@@ -35,7 +35,7 @@ namespace Training
     bool        PeriodicCondition::Start (void)
     {
         // record the start time
-        m_dwStartTime = Time::Now ().clock ();
+        m_dwStartTime = Clock::Now ().clock ();
 
         // always evaluate the condition the first time through
         return m_pCondition->Start ();
@@ -51,7 +51,7 @@ namespace Training
     bool        PeriodicCondition::Evaluate (void)
     {
         // get the current clock time, and compute how much time has elapsed.
-        DWORD   dwElapsedTime = (Time::Now ().clock ()  - m_dwStartTime);
+        DWORD   dwElapsedTime = (Clock::Now ().clock ()  - m_dwStartTime);
 
         // if the elapsed time is longer than the desired period
         if (dwElapsedTime > m_dwPeriod)

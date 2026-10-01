@@ -24,7 +24,11 @@
 #include "stdlib.h"
 #include "math.h"
 #include "time.h"
+#ifdef __APPLE__
+#include <malloc/malloc.h>
+#else
 #include "malloc.h"
+#endif
 
 #include <algorithm>
 
@@ -32,8 +36,10 @@
 // Required Win32 headers
 //
 
-#include "windows.h"
+#include "platform.h"
+#if defined(_WIN32) && !defined(ALLEGIANCE_NATIVE)
 #include "wininet.h"
+#endif
 
 //
 // DirectX Stuff
@@ -83,6 +89,7 @@
 //
 
 #include "event.h"
+#if defined(_WIN32) && !defined(ALLEGIANCE_NATIVE)
 #include "input.h"
 #include "genericlist.h"
 #include "FTPSession.h"
@@ -95,6 +102,7 @@
 #include "window.h"
 #include "Win32app.h"
 #include "VersionInfo.h"
+#endif
 
 //
 // Parser

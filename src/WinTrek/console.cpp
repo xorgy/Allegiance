@@ -1,4 +1,7 @@
 #include "pch.h"
+#include "../ClientCore/QuickChat.h"
+#include "../ClientCore/MessageLifetime.h"
+#include "../ClientCore/CommandPicking.h"
 #include "consoledata.h"
 #include "trekctrls.h"
 #include "loadout.h"
@@ -20,11 +23,9 @@ const int   c_iRecipientWing0   =  4;       //with subsequent wings following
 const int c_badMatch = 100000;
 
 
-const float c_minRectangleSize = 5.0f;
 static bool inline  LegalRectangle(const Point& p1, const Point& p2)
 {
-    return (fabs(p1.X() - p2.X()) > c_minRectangleSize) ||
-           (fabs(p1.Y() - p2.Y()) > c_minRectangleSize);
+    return Allegiance::CommandSelectionRectangle(p1.X()-p2.X(), p1.Y()-p2.Y());
 }
 
 
@@ -910,7 +911,7 @@ public:
         }
 
         // turn off tip text if it is expired
-        float   fTipTextDuration = Training::IsTraining () ? 30.0f : 7.5f;
+        float   fTipTextDuration = Allegiance::CriticalTipDuration(Training::IsTraining ());
         if (now - m_timeLastCriticalTipSet0 >= fTipTextDuration)
         {
             m_pstringCriticalTipText0->SetValue("");
@@ -1535,59 +1536,7 @@ public:
     {
         //m_pchsCurrent = &m_chsChat;
 
-        if (cid == c_cidMyAccepted)
-            cid = trekClient.GetShip()->GetCommandID(c_cmdAccepted);
-
-        //
-        // figure out the target
-        //
-        ImodelIGC* pmodel;
-        if (cid != c_cidNone)
-        {
-            assert (ttMask);
-
-            switch (ttMask)
-            {
-                case c_ttMyAccepted:
-                case c_ttMyQueued:
-                case c_ttMyTarget:
-                    assert (char(c_ttMyAccepted) == c_cmdAccepted);
-                    assert (char(c_ttMyQueued) == c_cmdQueued);
-                    assert (char(c_ttMyTarget) == c_cmdCurrent);
-
-                    pmodel = trekClient.GetShip()->GetCommandTarget(char(ttMask));
-                break;
-
-                case c_ttWorstEnemy:
-                {
-                    DamageTrack*        pdt = trekClient.GetShip()->GetDamageTrack();
-                    assert (pdt);
-                    DamageBucketLink* pdbl = pdt->GetDamageBuckets()->first();
-                    pmodel = pdbl ? pdbl->data()->model() : NULL;
-                }
-                break;
-
-                case c_ttMe:
-                    pmodel = trekClient.GetShip();
-                break;
-
-                default:
-                    pmodel = trekClient.GetShip()->GetCommandTarget(c_cmdCurrent);
-
-                    if ((!pmodel) ||
-                        (pmodel == trekClient.GetShip()) ||
-                        (!FindableModel(pmodel, trekClient.GetShip()->GetSide(), ttMask, aabm)) ||
-                        (!trekClient.GetShip()->CanSee(pmodel)))
-                    {
-                        pmodel = FindTarget(trekClient.GetShip(), ttMask, NULL, NULL, NULL, NULL, aabm);
-                    }
-            }
-
-            if (pmodel == NULL)
-                cid = c_cidNone;
-        }
-        else
-            pmodel = NULL;
+        ImodelIGC* pmodel = Allegiance::QuickChatTarget(trekClient.GetShip(), cid, ttMask, aabm);
 
         //Send the chat
         SendChatInternal(NULL,
@@ -1710,30 +1659,15 @@ public:
         Camera* pcamera = GetWindow()->GetCamera();
         const Orientation&  o = pcamera->GetOrientation();
         const Vector&       b = o.GetBackward();
-        if ((b.z > 0.9f) || (b.z < -0.9f))
-        {
-            //Too steep a view to making picking in 3D meaningful
-            m_positionStop.z = 0.0f;
-        }
-        else
-        {
-            Rect    rectImage = GetWindow()->GetViewport()->GetViewRect()->GetValue();
-            float   halfwidth = (0.5f * rectImage.XSize());
-
-            const Vector&   positionCamera = pcamera->GetPosition();
-
-            {
-                Point   pointStop = m_pointMouseStop - rectImage.Center();
-                Vector  directionStop = pcamera->TransformImageToDirection(pointStop / halfwidth);
-
-                float   px = m_positionStart.x - positionCamera.x;
-                float   py = m_positionStart.y - positionCamera.y;
-
-                m_positionStop.z = (px * directionStop.x * directionStop.z + 
-                                    py * directionStop.y * directionStop.z) /
-                                   (directionStop.x * directionStop.x + directionStop.y * directionStop.y) + positionCamera.z;
-            }
-        }
+        if (b.z > 0.9f || b.z < -0.9f) { m_positionStop.z = 0.0f; return; }
+        Rect rectImage = GetWindow()->GetViewport()->GetViewRect()->GetValue();
+        float halfwidth = 0.5f * rectImage.XSize();
+        const Vector& positionCamera = pcamera->GetPosition();
+        Point pointStop = m_pointMouseStop - rectImage.Center();
+        Vector directionStop = pcamera->TransformImageToDirection(pointStop / halfwidth);
+        m_positionStop.z = Allegiance::CommandPickAltitude(m_positionStart.x, m_positionStart.y,
+            positionCamera.x, positionCamera.y, positionCamera.z, b.z,
+            directionStop.x, directionStop.y, directionStop.z);
     }
 
     void    PickCluster(IclusterIGC* pcluster, int button)
@@ -2129,8 +2063,7 @@ public:
                                     const Point&    pxy = psite->GetScreenPosition();
                                     float           r = psite->GetScreenRadius();
 
-                                    if ((pxy.X() + r >= xMin) && (pxy.X() - r <= xMax) &&
-                                        (pxy.Y() + r >= yMin) && (pxy.Y() - r <= yMax))
+                                    if (Allegiance::CommandSelectionOverlap(pxy.X(), pxy.Y(), r, xMin, yMin, xMax, yMax))
                                     {
                                         ships.last(pship);
                                     }

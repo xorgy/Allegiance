@@ -14,33 +14,8 @@ TRef<Image> CreateIndicatorImage(Modeler* pmodeler, Viewport* pviewport, Number*
 // Training Overlay
 //
 //////////////////////////////////////////////////////////////////////////////
-enum TrainingOverlay
-{
-    NoTrainingOverlay,
-    SpeedTrainingOverlay,
-    MotionIndicatorTrainingOverlay,
-    ReticuleTrainingOverlay,
-    ThrottleTrainingOverlay,
-    FuelTrainingOverlay,
-    EnergyTrainingOverlay,
-    AmmoTrainingOverlay,
-    HullTrainingOverlay,
-    ShieldTrainingOverlay,
-    ChatTrainingOverlay,
-    SectorTrainingOverlay,
-    InventoryTrainingOverlay,
-    TargetTrainingOverlay,
-    CommandTrainingOverlay,
-    EyeballTrainingOverlay,
-    KillBonusTrainingOverlay,
-    RollTrainingOverlay,
-    BoosterTrainingOverlay,
-    TargetCenterTrainingOverlay,
-    FireGunsTrainingOverlay,
-    TargetEnemyTrainingOverlay,
-    MissileTrainingOverlay,
-    CloakTrainingOverlay
-};
+#include "../ClientCore/Overlay.h"
+
 void        SetTrainingOverlay(TrainingOverlay overlay);
 inline
 void        ClearTrainingOverlay(void) { SetTrainingOverlay(NoTrainingOverlay); }

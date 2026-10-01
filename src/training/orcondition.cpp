@@ -11,7 +11,7 @@
 **  History:
 */
 #include    "pch.h"
-#include    "OrCondition.h"
+#include    "orcondition.h"
 
 namespace Training
 {

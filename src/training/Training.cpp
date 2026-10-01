@@ -16,9 +16,9 @@
 #include    "Mission3.h"
 #include    "Mission4.h"
 #include    "Mission5.h"
-#include    "Mission6.h"
-#include    "Mission8.h" //TheBored 06-JUL-07: Adding nanite mission.
-#include    "Mission10.h"
+#include    "mission6.h"
+#include    "mission8.h" //TheBored 06-JUL-07: Adding nanite mission.
+#include    "mission10.h"
 
 namespace Training
 {

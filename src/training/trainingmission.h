@@ -46,6 +46,8 @@ namespace Training
                     void                    Terminate (void);
                     void                    AddWaitCondition (Condition* pWaitCondition);
             virtual bool                    RecordKeyPress (TrekKey key);
+                    void                    RemoveKeyCondition(Condition* condition) { m_KeyConditionList.remove(condition); }
+                    void                    RemoveChatCondition(Condition* condition) { if (m_pChatCondition == condition) m_pChatCondition = NULL; }
                     void                    AddKeyCondition (Condition* pKeyCondition);
                     void                    AddRespawn(CreateDroneAction* pCreateDroneAction, float downtime, char spawnGroup, bool waitForFirstSpawn);
                     void                    RemoveRespawn(ShipID shipID);
@@ -94,6 +96,7 @@ namespace Training
                     TrekWindow::CameraMode  m_deadCameraMode;
                     bool                    m_bSkipPostSlideShow;
                     bool                    m_commandViewEnabled;
+                    bool                    m_endAfterStationLoss;
                     std::list<RespawnData*> m_RespawnList;
                     int                     m_killCount;
     };

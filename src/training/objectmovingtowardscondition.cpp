@@ -11,7 +11,7 @@
 **  History:
 */
 #include    "pch.h"
-#include    "ObjectMovingTowardsCondition.h"
+#include    "objectmovingtowardscondition.h"
 
 namespace Training
 {

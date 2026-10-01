@@ -5,6 +5,8 @@
 //////////////////////////////////////////////////////////////////////////////
 
 #include "thinggeo.h"
+#include "../ClientCore/ParticleEffects.h"
+#include "../ClientCore/ShieldFlare.h"
 
 #include <geometry.h>
 #include <model.h>
@@ -555,27 +557,9 @@ public:
         Vector&         vecStartVelocity
     )
     {
-        // compute the ejection velocity that we will actually use, based on the size of the effect
-        float   fEjectionVelocity = random (fEjectionVelocityMin, fEjectionVelocityMax) * fEffectSize;
-
-        // compute the thrust vector
-        Vector  vecThrust = fEjectionVelocity * vecFrameThrustDirection;
-
-        // compute the theoretical start point for the particle accounting for thrust velocity, old frame velocity, and frame acceleration
-        Vector  vecTheoreticalStartPosition = vecFrameOrigin + (fTimeSinceCreation * vecThrust);
-
-        // compute the theoretical end point for the particle
-        Vector  vecTheoreticalEndPosition = vecTheoreticalStartPosition + (fEffectDuration * vecThrust);
-
-        // compute a randomized start location
-        vecStartPosition = vecTheoreticalStartPosition + ((fStartPositionVariance * fEffectSize) * Vector::RandomDirection ());
-
-        // compute the travel vector of the particle and divide it by the effect time to get
-        // velocity relative to the ship
-        Vector  vecRelativeVelocity = (vecTheoreticalEndPosition - vecStartPosition) / fEffectDuration;
-
-        // compute the actual particle velocity by adding the frame velocity and acceleration to the relative velocity
-        vecStartVelocity = vecRelativeVelocity + vecFrameVelocity - (fTimeSinceCreation * vecFrameAcceleration);
+        Allegiance::FireParticle(fTimeSinceCreation, vecFrameOrigin, vecFrameVelocity, vecFrameAcceleration,
+            vecFrameThrustDirection, fEjectionVelocityMin, fEjectionVelocityMax, fEffectDuration, fStartPositionVariance, fEffectSize, vecStartPosition, vecStartVelocity,
+            [](float low, float high) { return random(low, high); }, []() { return Vector::RandomDirection(); });
     }
 
     ////////////////////////////////////////////////////////////////////////////
@@ -599,20 +583,9 @@ public:
         Vector&         vecStartVelocity
     )
     {
-        // compute the ejection velocity that we will actually use, based on the size of the effect
-        float   fEjectionVelocity = random (fEjectionVelocityMin, fEjectionVelocityMax) * fEffectSize;
-
-        // compute the thrust vector
-        Vector  vecThrust = fEjectionVelocity * vecFrameThrustDirection;
-
-        // compute the theoretical start point for the particle accounting for thrust velocity, old frame velocity, and frame acceleration
-        Vector  vecTheoreticalStartPosition = vecFrameOrigin + (fTimeSinceCreation * vecThrust);
-
-        // compute a randomized start location
-        vecStartPosition = vecTheoreticalStartPosition + ((fStartPositionVariance * fEffectSize) * Vector::RandomDirection ());
-
-        // compute the actual particle velocity by adding the frame velocity and acceleration to the relative velocity
-        vecStartVelocity = vecThrust + vecFrameVelocity - (fTimeSinceCreation * vecFrameAcceleration);
+        Allegiance::SmokeParticle(fTimeSinceCreation, vecFrameOrigin, vecFrameVelocity, vecFrameAcceleration,
+            vecFrameThrustDirection, fEjectionVelocityMin, fEjectionVelocityMax, fStartPositionVariance, fEffectSize, vecStartPosition, vecStartVelocity,
+            [](float low, float high) { return random(low, high); }, []() { return Vector::RandomDirection(); });
     }
 
     ////////////////////////////////////////////////////////////////////////////
@@ -648,18 +621,13 @@ public:
 
             // compute how many sparks to show, based on a linear increase
             // of particles over the leadup time
-            float           fTimeToShowSparks = 3.0f;
-            fTimeToShowSparks = fTimeUntilTeleport / fTimeToShowSparks;
-            if (fTimeToShowSparks > 1.0f)
-                fTimeToShowSparks = 1.0f;
-            if (fTimeToShowSparks < 0.0f)
-                fTimeToShowSparks = 0.0f;
-            float           fCountUpToOne = 1.0f - fTimeToShowSparks;
-            float           fScaledUpCount = ((fCountUpToOne * 2.0f) + 1.0f) * m_radius;
-            int             iSparkCount = int (floorf (TELEPORT_SPARK_COUNT * float (s_iShowSmoke) * fCountUpToOne) + 0.5f);
+            const auto emission = Allegiance::TeleportParticles(fTimeUntilTeleport, m_radius, s_iShowSmoke);
+            float fTimeToShowSparks = emission.before;
+            float fScaledUpCount = emission.scale;
+            int iSparkCount = emission.count;
 
             // now loop over all the spark count, spewing them as necessary
-            float           fSparkTimeDelta = fDeltaTime / float (iSparkCount);
+            float           fSparkTimeDelta = iSparkCount ? fDeltaTime / float(iSparkCount) : 0.0f;
             for (int i = 0; i < iSparkCount; i++)
             {
                 // start by figuring how big of a "blast" to make, and building the initial blast vector
@@ -669,22 +637,11 @@ public:
                 // project the blast vector onto the plane in front of the ship, and compute the
                 // offset from the desired vector to the projected vector
                 Vector          vecParticleVelocityProjected = ((vecParticleVelocity * vecX) * vecX) + ((vecParticleVelocity * vecY) * vecY);
-                Vector          vecDeltaProjection = vecParticleVelocityProjected - vecParticleVelocity;
-
-                // the final velocity vector is an interpolation from the blast vector to the projected
-                // vector, based on the duration of the effect
-                vecParticleVelocity = (fTimeToShowSparks * vecDeltaProjection) + vecParticleVelocity;
-
-                // create the particle and set its parameters
-                ParticleData*   pParticleData = m_pParticleGeo->AddSpark ();
-                float           fRandomStartTime = random (float (i), float (i) + 1.0f) * fSparkTimeDelta;
-                pParticleData->m_vecVelocity = vecFrameVelocity + vecParticleVelocity;
-                pParticleData->m_vecAcceleration = -vecFrameVelocity;
-                pParticleData->m_vecPosition = 
-                      m_vecPositionLast 
-                    + (fTimeToShowSparks * m_radius * 1.5f * vecZ) 
-                    + (vecParticleVelocity * ((1.0f - fTimeToShowSparks) + fRandomStartTime)) 
-                    + (0.5f * fRandomStartTime * fRandomStartTime * pParticleData->m_vecAcceleration);
+                ParticleData* pParticleData = m_pParticleGeo->AddSpark();
+                float fRandomStartTime = random(float(i), float(i) + 1.0f) * fSparkTimeDelta;
+                Allegiance::TeleportParticle(fTimeToShowSparks, m_radius, fRandomStartTime,
+                    m_vecPositionLast, vecFrameVelocity, vecZ, vecParticleVelocity, vecParticleVelocityProjected,
+                    pParticleData->m_vecPosition, pParticleData->m_vecVelocity, pParticleData->m_vecAcceleration);
                 pParticleData->m_fSize = random (fScaledUpCount * 0.15f, fScaledUpCount * 0.3f);
                 pParticleData->m_fDuration = 0.5f;
             }
@@ -767,11 +724,8 @@ public:
             // to some user set preference for performance reasons. The clamping may lead 
             // to some clumping, but it's better than drowning the performance of the 
             // engine and blowing out the effect
-			int     iParticlesPerFrame = int (2.0f * fDeltaLength / (m_sizeSmoke * m_fThrustPower));
-            if (iParticlesPerFrame < 1)
-                iParticlesPerFrame = 1;
-            else if (iParticlesPerFrame > s_iShowSmoke)
-                iParticlesPerFrame = s_iShowSmoke;
+            int iParticlesPerFrame = Allegiance::ThrustParticleCount(fDeltaLength, m_sizeSmoke, m_fThrustPower, s_iShowSmoke);
+            if (!iParticlesPerFrame) return;
             float   fUniformTimeBetweenParticles = fDeltaTime / float (iParticlesPerFrame);
 
             // parameters that will be used repeatedly
@@ -1253,33 +1207,11 @@ public:
         // Transform the direction into local space
         //
 
-        Vector vecLocal = m_orientation.TimesInverse(-vecDirection);
-
-        //
-        // Orient the geo to point along vecLocal
-        //
-
-        Orientation orient;
-
+        Orientation orient = Allegiance::ShieldFlareOrientation(m_orientation, -vecDirection, m_radius, pvectorEllipse);
         if (pvectorEllipse) {
-            Vector vector = vecLocal;
-
-            vector.x /= pvectorEllipse->x;
-            vector.y /= pvectorEllipse->y;
-            vector.z /= pvectorEllipse->z;
-
-            orient.Set(vector);
-            orient.Scale((*pvectorEllipse) / m_radius);
-
-            //
-            // The culling radius is equal to the largest extent of the ellipse
-            //
-
             m_radiusCull = std::max(m_radiusCull, pvectorEllipse->X());
             m_radiusCull = std::max(m_radiusCull, pvectorEllipse->Y());
             m_radiusCull = std::max(m_radiusCull, pvectorEllipse->Z());
-        } else {
-            orient.Set(vecLocal);
         }
 
         //
@@ -1357,7 +1289,7 @@ public:
 
     void    AddDamage (const Vector& vecDamagePosition, float fDamageFraction)
     {
-        int iDamageIndexOpen = int((1.0f - fDamageFraction) * MAX_DAMAGE_FRAMES) - 1;
+        int iDamageIndexOpen = Allegiance::DamageFrameCount(fDamageFraction) - 1;
         int iDamageIndex = bound(iDamageIndexOpen, -1, MAX_DAMAGE_FRAMES - 1);
 
         if (iDamageIndex != iDamageIndexOpen) {
@@ -1367,10 +1299,10 @@ public:
         if (iDamageIndex > m_iLastDamageIndex)
         {
             Vector  vecPosition = vecDamagePosition * 0.33f;
-            Vector  vecFromDirection = vecPosition.Normalize ();
+            Vector  vecFromDirection = vecPosition.LengthSquared() > 0 ? vecPosition.Normalize() : m_orientation.GetBackward();
             Vector  vecForward = m_orientation.TimesInverse (vecFromDirection);
             vecPosition = m_orientation.TimesInverse (vecPosition);
-            while (m_iLastDamageIndex <= iDamageIndex)
+            while (m_iLastDamageIndex < iDamageIndex)
             {
                 m_iLastDamageIndex++;
                 m_damageFrames[m_iLastDamageIndex].m_vecForward = vecForward;
@@ -1383,7 +1315,7 @@ public:
 
     void    RemoveDamage (float fDamageFraction)
     {
-        int iDamageIndexOpen = int((1.0f - fDamageFraction) * MAX_DAMAGE_FRAMES) - 1;
+        int iDamageIndexOpen = Allegiance::DamageFrameCount(fDamageFraction) - 1;
         int iDamageIndex = bound(iDamageIndexOpen, -1, MAX_DAMAGE_FRAMES - 1);
 
         if (iDamageIndex != iDamageIndexOpen) {

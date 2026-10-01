@@ -16,6 +16,16 @@
 */
 // projectileIGC.cpp : Implementation of CprojectileIGC
 #include "projectileIGC.h"
+#ifdef ALLEGIANCE_NATIVE
+#include "../native/object_pool.hpp"
+void* CprojectileIGC::operator new(size_t n) {
+    assert(n==sizeof(CprojectileIGC));
+    return Native::ObjectPool<sizeof(CprojectileIGC),alignof(CprojectileIGC)>::allocate();
+}
+void CprojectileIGC::operator delete(void* p) noexcept {
+    Native::ObjectPool<sizeof(CprojectileIGC),alignof(CprojectileIGC)>::release(p);
+}
+#endif
 
 /////////////////////////////////////////////////////////////////////////////
 // CprojectileIGC

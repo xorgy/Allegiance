@@ -162,6 +162,12 @@ class CmineIGC : public TmodelIGC<ImineIGC>
             m_bCreateNow = true;
         }
 
+#ifdef ALLEGIANCE_NATIVE
+        void NativeRestoreStrength(float fraction) {
+            m_fraction = fraction;
+            GetThingSite()->SetMineStrength(fraction);
+        }
+#endif
         virtual float            GetStrength(void) const
         {
             return m_fraction;

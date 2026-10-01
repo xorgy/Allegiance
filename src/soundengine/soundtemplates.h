@@ -3,7 +3,11 @@
 //
 // Several useful sound template implementations.
 //
+#ifdef ALLEGIANCE_NATIVE
+#include "../zlib/platform.h"
+#else
 #include <windows.h>
+#endif
 #include <tref.h>
 #include <zstring.h>
 
@@ -15,6 +19,8 @@ namespace SoundEngine {
 
 // creates a sound template for the given wave file
 HRESULT CreateWaveFileSoundTemplate(TRef<ISoundTemplate>& pstDest, const ZString& strFilename);
+// Backends with their own decoder/cache can supply PCM without a second file load.
+HRESULT CreateWaveFileSoundTemplate(TRef<ISoundTemplate>& pstDest, ISoundPCMData* data);
 
 // creates a dummy sound template 
 // (NOTE: Not optimized - fix or use only for error handling!)

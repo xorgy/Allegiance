@@ -22,7 +22,11 @@
 #include <map>
 #include <string>
 #include <vector>
-#include <windows.h>
+#include "platform.h"
+#ifndef _WIN32
+struct CONTEXT;
+using LPEXCEPTION_POINTERS = void*;
+#endif
 
 struct FunctionCall 
 {

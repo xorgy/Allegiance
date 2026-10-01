@@ -7,7 +7,7 @@
 
 #include <cmath>
 #include <cstdint>
-#include <windows.h>
+#include "platform.h"
 
 #include "TlsValue.h"
 

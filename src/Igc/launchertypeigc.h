@@ -23,6 +23,9 @@
 class   ClauncherTypeIGC : public IlauncherTypeIGC
 {
     public:
+#ifdef ALLEGIANCE_NATIVE
+        void NativeSetStaticOwner(ImissionIGC* owner) override { m_pMission = owner; }
+#endif
         ClauncherTypeIGC(void)
         :
             m_pexpendabletype(NULL)

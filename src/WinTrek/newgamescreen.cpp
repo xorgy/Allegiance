@@ -1084,28 +1084,9 @@ public:
             }
         }
 
-        // KGJV fix: prevent all teams to be inactive when game owner change the number of teams
         if (!pszReason)
-        {
-            // if number of teams was reduced
-            if (pfmMissionParams->missionparams.nTeams < GetBaseMissionParams().nTeams)
-            {
-                // then we make sure there is at least one activated team
-                bool bAllInactive = true;
-                for (int i=0;i<pfmMissionParams->missionparams.nTeams;i++)
-                {
-                    if (trekClient.MyMission()->SideActive(i))
-                    {
-                        bAllInactive = false;
-                        break;
-                    }
-                }
-                if (bAllInactive)
-                {
-                    pszReason = "You can't reduce the number of teams if all remaining teams would be inactive.";
-                }
-            }
-        }
+            pszReason = Allegiance::MissionTeamReductionError(GetBaseMissionParams().nTeams, pfmMissionParams->missionparams.nTeams,
+                [&](int side) { return trekClient.MyMission()->SideActive(side); });
 
 		// TE: If they set stats count, set lock sides. mmf changed to modify MaxImbalance to 'auto' setting
 		// mmf note game settings Max Team Imbalance field is not updated until you accept changes

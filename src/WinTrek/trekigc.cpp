@@ -12,6 +12,19 @@
 */
 
 #include "pch.h"
+#include "../ClientCore/Targeting.h"
+#include "../ClientCore/PlayerCommands.h"
+#include "../ClientCore/ClusterWarnings.h"
+#include "../ClientCore/MissionEconomy.h"
+#include "../ClientCore/Inventory.h"
+#include "../ClientCore/ShipSound.h"
+#include "../ClientCore/ClientSoundEvents.h"
+#include "../ClientCore/ChatPresentation.h"
+#include "../ClientCore/QueuedRequests.h"
+#include "../ClientCore/ExplosionEffects.h"
+#include "../ClientCore/WarpTransit.h"
+#include "../ClientCore/Visibility.h"
+#include "../ClientCore/ShipLifecycle.h"
 #include <stddef.h>
 #include "training.h"
 #include "regkey.h"
@@ -93,12 +106,7 @@ class ClusterSiteImpl : public ClusterSite
             {
                 GenericSoundSource* psource = new GenericSoundSource(vecPosition, vecVelocity);
 
-                if (scale > 100.0f)
-                    trekClient.StartSound(largeExplosionSound, psource);
-                else if (scale > 10.0f)
-                    trekClient.StartSound(mediumExplosionSound, psource);
-                else
-                    trekClient.StartSound(smallExplosionSound, psource);
+                trekClient.StartSound(Allegiance::ExplosionSound(scale), psource);
             }
 
             //
@@ -106,62 +114,12 @@ class ClusterSiteImpl : public ClusterSite
             //
 
             TRef<Image> pimageShockWave;
-            Color       color(Color::White());
-            float       radiusWave      = 0;
-            float       radiusExplosion = scale;
-            int         count           = 0;
-
-            switch(type) {
-                case 1: 
-                    count           = 4;
-                    radiusWave      = 50;
-                    radiusExplosion = 25;
-                    pimageShockWave = trekClient.m_pimageShockWave;
-                    color           = Color(154.0f / 255.0f, 130.0f / 255.0f, 190.0f / 255.0f);
-                    break;
-
-                case 2:
-                    count           = 6;
-                    radiusExplosion = 1;        //Hack: ignore the scale passed in
-                    break;
-
-                case 3:
-                    count           = 12;
-                    radiusWave      = 70;
-                    radiusExplosion = 35;
-                    pimageShockWave = trekClient.m_pimageShockWave;
-                    color = Color(200.0f / 255.0f, 130.0f / 255.0f, 50.0f / 255.0f);
-                    break;
-
-                case 4:
-                    count           = 16;
-                    radiusWave      = 250;
-                    radiusExplosion = 165;
-                    pimageShockWave = trekClient.m_pimageShockWave;
-                    color = Color(200.0f / 255.0f, 130.0f / 255.0f, 50.0f / 255.0f);
-                    break;
-
-                case 5:
-                    count           = 16;
-                    radiusWave      = 800;
-                    radiusExplosion = 100;
-                    pimageShockWave = trekClient.m_pimageShockWave;
-                    color = Color(220.0f / 255.0f, 130.0f / 255.0f, 50.0f / 255.0f);
-                    break;
-
-                case 6:
-                    count           = 5;
-                    radiusExplosion = 150;
-                    break;
-
-                case 7:
-                    count           = 24;
-                    radiusWave      = 1000;
-                    radiusExplosion = 350;
-                    pimageShockWave = trekClient.m_pimageShockWave;
-                    color = Color(200.0f / 255.0f, 130.0f / 255.0f, 50.0f / 255.0f);
-                    break;
-            }
+            auto profile = Allegiance::ExplosionAppearance(type, scale);
+            Color color(profile.red, profile.green, profile.blue);
+            float radiusWave = profile.waveRadius;
+            float radiusExplosion = profile.radius;
+            int count = profile.count;
+            if (radiusWave > 0) pimageShockWave = trekClient.m_pimageShockWave;
 
             m_pexplosionGeo->AddExplosion(
                 vecPosition,
@@ -329,58 +287,13 @@ class ClusterSiteImpl : public ClusterSite
             if (m_assetmaskLastWarning == m_assetmask)
                 return; // nothing to do
 
-            bool bInvulnerableStations = trekClient.MyMission()->GetMissionParams().bInvulnerableStations;
-            ClusterWarning  cwOld = GetClusterWarning(m_assetmaskLastWarning, bInvulnerableStations);
-            ClusterWarning  cwNew = GetClusterWarning(m_assetmask, bInvulnerableStations);
-
-            if ((cwNew != cwOld) && (cwNew > c_cwNoThreat))
-            {
-                static const SoundID c_vAlertSounds[c_cwMax] = 
-                {
-                    NA, 
-                    NA,
-                    NA,
-                    NA,
-                    NA,
-                    minerThreatenedSound, 
-                    constructorThreatenedSound, 
-                    carrierThreatenedSound, 
-                    bomberDetectedSound,
-                    carrierDetectedSound, 
-                    capitalDetectedSound,
-                    teleportDetectedSound,
-                    transportDetectedSound,
-                    stationThreatenedSound,
-                    stationThreatenedSound,
-                    stationThreatenedSound
-                };
-
-                if ((cwNew >= c_cwMinerThreatened) || (trekClient.GetShip()->GetWingID() == 0))
-                    trekClient.PostText(cwNew > cwOld, "%s in %s", GetClusterWarningText(cwNew), m_pcluster->GetName());
-
-                if (c_vAlertSounds[cwNew] != NA)
-                    trekClient.PlaySoundEffect(c_vAlertSounds[cwNew]);
-            }
-
-            if (trekClient.IsInGame())
-            {
-                bool bNewSectorSecured = (m_assetmask & c_amStation) 
-                    && !(m_assetmask & c_amEnemyStation);
-                bool bOldSectorSecured = (m_assetmaskLastWarning & c_amStation)
-                    && !(m_assetmaskLastWarning & c_amEnemyStation);
-            
-                if (bNewSectorSecured && !bOldSectorSecured)
-                {
-                    trekClient.PostText(false, "%s secured.", m_pcluster->GetName());
-                    trekClient.PlaySoundEffect(sectorSecuredSound);
-                }
-                else if (!(m_assetmask & c_amStation) 
-                    && (m_assetmaskLastWarning & c_amStation))
-                {
-                    trekClient.PostText(false, "%s lost.", m_pcluster->GetName());
-                    trekClient.PlaySoundEffect(sectorLostSound);
-                }
-            }
+            Allegiance::ClusterWarningChanges(m_assetmaskLastWarning, m_assetmask,
+                trekClient.IsInGame(), trekClient.MyMission()->GetMissionParams().bInvulnerableStations,
+                trekClient.GetShip()->GetWingID(),
+                [&](bool critical, const char* text) { trekClient.PostText(critical, "%s in %s", text, m_pcluster->GetName()); },
+                [&]() { trekClient.PostText(false, "%s secured.", m_pcluster->GetName()); },
+                [&]() { trekClient.PostText(false, "%s lost.", m_pcluster->GetName()); },
+                [&](SoundID sound) { trekClient.PlaySoundEffect(sound); });
 
             m_assetmaskLastWarning = m_assetmask;
         }
@@ -731,13 +644,7 @@ private:
     IshipIGC* m_pship;
     Mount m_mountLastTurret;
     
-    float m_fHullFraction;
-    float m_fAmmoFraction;
-    float m_fFuelFraction;
-    float m_fEnergyFraction;
-    bool  m_bTryingToFireWeaponWithoutAmmo;
-    bool  m_bTryingToUseAfterburnersWithoutFuel;
-    int   m_nRipcordCountdown;
+    Allegiance::ShipSoundNotifications m_notifications;
 
     TRef<ISoundPositionSource> m_psourceEngine;
     TRef<ISoundPositionSource> m_psounceWeaponMount[c_maxMountedWeapons];
@@ -771,50 +678,8 @@ private:
 
     // the last state of this sound
     enum { wasSilent, wasPlaying } m_stateLast;
-    float m_fThrustSoundLevel;
-    float m_fTurnSoundLevel;
-    
-    // calculate the current fraction of the potential amount of forward thrust
-    float ForwardThrustFraction()
-    {
-        //float fForwardThrust = -1 * m_pship->GetEngineVector() 
-        //    * m_pship->GetOrientation().GetBackward();
-        //float fForwardThrustFraction = fForwardThrust / m_pship->GetHullType()->GetThrust();
-        
-        // return fForwardThrustFraction;
-        // realistic as this may be, it does not reflect the player's 
-        // expectations.  Thus, use the throttle instead. 
-        const ControlData&  controls = m_pship->GetControls();
-        return std::max(controls.jsValues[c_axisThrottle] * 0.5f + 0.5f, 
-            (m_pship->GetStateM() & afterburnerButtonIGC) ? 1.0f : 0.0f);
-    }
-
-    // calculate the current fraction of the potential amount of sideways thrust
-    float SidewaysThrustFraction()
-    {
-        const IhullTypeIGC* pht = m_pship->GetHullType();
-        float fThrust = m_pship->GetHullType()->GetThrust() 
-            / m_pship->GetHullType()->GetSideMultiplier();
-        float fForwardThrust = std::max(0.0f, -1 * m_pship->GetEngineVector() 
-            * m_pship->GetOrientation().GetBackward());
-        Vector vectSideThrust = m_pship->GetEngineVector() + 
-            fForwardThrust * m_pship->GetOrientation().GetBackward();
-
-        return vectSideThrust.LengthSquared() / (fThrust * fThrust);
-    }
-
-    // calculate a rough and dirty aproximation of the amount of current turning
-    float TurnRate(IshipIGC* pship)
-    {
-        const ControlData&  controls = pship->GetControls();
-        return (controls.jsValues[c_axisYaw] * controls.jsValues[c_axisYaw] +
-                        controls.jsValues[c_axisPitch] * controls.jsValues[c_axisPitch] +
-                        controls.jsValues[c_axisRoll] * controls.jsValues[c_axisRoll]);
-    }
-    float TurnRate()
-    {
-        return TurnRate(m_pship);
-    }
+    Allegiance::ShipSoundLevels m_engineLevels;
+    float TurnRate(IshipIGC* ship) { return Allegiance::ShipTurnSoundLevel(ship); }
 
     // calculate the current afterburner power
     float AfterburnerPower()
@@ -822,55 +687,6 @@ private:
         IafterburnerIGC* pafterburner = 
             (IafterburnerIGC*)(m_pship->GetMountedPart(ET_Afterburner, 0));
         return pafterburner ? pafterburner->GetPower() : 0.0f;
-    }
-
-    // true if the player is trying to fire an ammo weapon without enough 
-    // ammunition, or observing someone doing the same.
-    bool TryingToFireWeaponWithoutAmmo()
-    {
-        // we should only be called for the player's ship
-        ZAssert(m_pship == trekClient.GetShip()->GetSourceShip());
-
-        Mount mount = trekClient.GetShip()->GetTurretID();
-
-        // if the player is a turret gunner...
-        if (mount != NA)
-        {
-            // just check that gun
-            const IweaponIGC* pweapon;
-            CastTo(pweapon, m_pship->GetMountedPart(ET_Weapon, mount));
-
-            return (pweapon && pweapon->fActive() && pweapon->GetMountedFraction() >= 1.0f
-                && pweapon->GetAmmoPerShot() > m_pship->GetAmmo());
-        }
-        else
-        {
-            // check all of the fixed weapon mounts
-            Mount maxFixedWeapons = m_pship->GetHullType()->GetMaxFixedWeapons();
-            for (mount = 0; mount < maxFixedWeapons; mount++) 
-            {
-                const IweaponIGC* pweapon;
-                CastTo(pweapon, m_pship->GetMountedPart(ET_Weapon, mount));
-
-                if (pweapon && pweapon->fActive() && pweapon->GetMountedFraction() >= 1.0f
-                    && pweapon->GetAmmoPerShot() > m_pship->GetAmmo()) 
-                {
-                    return true;
-                }
-            }
-
-            return false;
-        }
-    }
-
-    bool TryingToFireAfterburnersWithoutFuel()
-    {
-        IafterburnerIGC* pafterburner = 
-            (IafterburnerIGC*)(m_pship->GetMountedPart(ET_Afterburner, 0));
-        return pafterburner 
-            && (m_pship->GetStateM() & afterburnerButtonIGC)
-            && m_pship->GetFuel() <= 0.0f 
-            && pafterburner->GetMountedFraction() >= 1.0;;
     }
 
     bool HasMissileLock()
@@ -890,24 +706,10 @@ private:
             m_pPilotInteriorSound->GetISoundTweakable()->SetGain(fGain);
         if (m_pGunnerInteriorSound)
             m_pGunnerInteriorSound->GetISoundTweakable()->SetGain(fGain);
-        float fThrustVolumeFactor = (1 - m_fThrustSoundLevel);
-        fThrustVolumeFactor *= fThrustVolumeFactor;
-        fThrustVolumeFactor *= fThrustVolumeFactor;
-        fThrustVolumeFactor *= fThrustVolumeFactor;
-        fThrustVolumeFactor *= fThrustVolumeFactor;
-        fThrustVolumeFactor *= fThrustVolumeFactor;
-        fThrustVolumeFactor *= fThrustVolumeFactor;
-
         if (m_pMainThrusterInteriorSound)
-            m_pMainThrusterInteriorSound->GetISoundTweakable()->SetGain(fGain + 
-            fThrustVolumeFactor * -60);
-
-        float fTurnThrustVolumeFactor = (1 - m_fTurnSoundLevel);
-        fTurnThrustVolumeFactor *= fTurnThrustVolumeFactor;
-
+            m_pMainThrusterInteriorSound->GetISoundTweakable()->SetGain(fGain + m_engineLevels.MainGain(true));
         if (m_pTurnThrusterInteriorSound)
-            m_pTurnThrusterInteriorSound->GetISoundTweakable()->SetGain(fGain + 
-                fTurnThrustVolumeFactor * -60);
+            m_pTurnThrusterInteriorSound->GetISoundTweakable()->SetGain(fGain + m_engineLevels.TurnGain(true));
         if (m_pAfterburnerInteriorSound)
             m_pAfterburnerInteriorSound->GetISoundTweakable()->SetGain(fGain);
     }
@@ -919,10 +721,10 @@ private:
             m_pExteriorSound->GetISoundTweakable()->SetGain(fGain);
         if (m_pMainThrusterExteriorSound)
             m_pMainThrusterExteriorSound->GetISoundTweakable()->SetGain(fGain + 
-                (1 - m_fThrustSoundLevel) * -40);
+                m_engineLevels.MainGain(false));
         if (m_pTurnThrusterExteriorSound)
             m_pTurnThrusterExteriorSound->GetISoundTweakable()->SetGain(fGain + 
-                (1 - m_fTurnSoundLevel) * -40);
+                m_engineLevels.TurnGain(false));
         if (m_pAfterburnerExteriorSound)
             m_pAfterburnerExteriorSound->GetISoundTweakable()->SetGain(fGain);
     }
@@ -980,96 +782,13 @@ private:
                 m_vpCurrentWeaponType[mount] = pweapon->GetPartType();
             }
 
-            // if the weapon is just being activated, play the relevant sound
-            PlaySoundIf(m_vpActiveSound[mount], pweapon ? pweapon->GetActivateSound() : NA, 
-                m_psounceWeaponMount[mount], pweapon && pweapon->fActive());
-
-            // if the turret is manned and moving, play the turret sound
-            // REVIEW: it looks like we only get turrent move info for other
-            // players if the turret is firing!
-            PlaySoundIf(m_vpTurretSound[mount], 
-                m_pship->GetHullType()->GetHardpointData(mount).turnSound, 
-                m_psounceWeaponMount[mount], 
-                pweapon && pweapon->GetGunner()
-                    && (pweapon->fActive() 
-                        || pweapon->GetGunner() == trekClient.GetShip())
-                    && TurnRate(pweapon->GetGunner()) > 0.01);
-
-            // if the weapon is burst-firing, play that sound
-            bool bWasBurstFiring = m_vpBurstSound[mount] != NULL;
-            SoundID idBurstSound = pweapon ? pweapon->GetBurstSound() : NA;
-            PlaySoundIf(m_vpBurstSound[mount], idBurstSound, 
-                m_psounceWeaponMount[mount], 
-                pweapon && pweapon->fFiringBurst() && (idBurstSound != NA));
-
-            // if we shot this frame and we are not playing a burst-fire sound,
-            // play a single shot sound.
-            if (pweapon && pweapon->fFiringShot() 
-                && m_vpBurstSound[mount] == NULL && !bWasBurstFiring)
-            {
-                trekClient.StartSound(pweapon->GetSingleShotSound(), 
-                    m_psounceWeaponMount[mount]);
-            }
-        }
-    }
-
-    void UpdateRipcordCountdown()
-    {
-        if (!trekClient.GetShip()->GetSourceShip()->fRipcordActive())
-        {
-            m_nRipcordCountdown = 11;
-        }
-        else
-        {
-            int nRipcordCountdown = 1 + (int)trekClient.GetShip()->GetSourceShip()->GetRipcordTimeLeft();
-
-            if (nRipcordCountdown != m_nRipcordCountdown)
-            {
-                switch (nRipcordCountdown)
-                {
-                case 10:
-                    trekClient.StartSound(ripcord10Sound, GetSoundSource());
-                    break;
-
-                case 9:
-                    trekClient.StartSound(ripcord9Sound, GetSoundSource());
-                    break;
-
-                case 8:
-                    trekClient.StartSound(ripcord8Sound, GetSoundSource());
-                    break;
-
-                case 7:
-                    trekClient.StartSound(ripcord7Sound, GetSoundSource());
-                    break;
-
-                case 6:
-                    trekClient.StartSound(ripcord6Sound, GetSoundSource());
-                    break;
-
-                case 5:
-                    trekClient.StartSound(ripcord5Sound, GetSoundSource());
-                    break;
-
-                case 4:
-                    trekClient.StartSound(ripcord4Sound, GetSoundSource());
-                    break;
-
-                case 3:
-                    trekClient.StartSound(ripcord3Sound, GetSoundSource());
-                    break;
-
-                case 2:
-                    trekClient.StartSound(ripcord2Sound, GetSoundSource());
-                    break;
-
-                case 1:
-                    trekClient.StartSound(ripcord1Sound, GetSoundSource());
-                    break;
-                }
-
-                m_nRipcordCountdown = nRipcordCountdown;
-            }
+            auto sounds = Allegiance::SelectWeaponSounds(m_pship, mount, trekClient.GetShip(),
+                m_vpBurstSound[mount] != NULL);
+            PlaySoundIf(m_vpActiveSound[mount], sounds.active, m_psounceWeaponMount[mount], sounds.active != NA);
+            PlaySoundIf(m_vpTurretSound[mount], sounds.turret, m_psounceWeaponMount[mount], sounds.turret != NA);
+            PlaySoundIf(m_vpBurstSound[mount], sounds.burst, m_psounceWeaponMount[mount], sounds.burst != NA);
+            if (sounds.shot != NA)
+                trekClient.StartSound(sounds.shot, m_psounceWeaponMount[mount]);
         }
     }
 
@@ -1132,47 +851,21 @@ private:
 
     void UpdateEngineSoundLevels(DWORD dwElapsedTime)
     {
-        float fNewThrustSoundLevel = ForwardThrustFraction();
-        float fNewTurnSoundLevel = std::min(1.0f, std::max(TurnRate() * 20, SidewaysThrustFraction()));
-
-        // if we were playing this sound a moment ago...
-        if (wasSilent != m_stateLast)
-        {
-            const float cfMaxThrustRateOfChange = 0.0005f;
-            const float cfMaxTurnRateOfChange = 0.002f;
-
-            // clip the new sound level according to the max rate of change 
-            // allowed.
-            fNewThrustSoundLevel = std::max(
-                m_fThrustSoundLevel - cfMaxThrustRateOfChange * dwElapsedTime,
-                std::min(
-                    m_fThrustSoundLevel + cfMaxThrustRateOfChange * dwElapsedTime,
-                    fNewThrustSoundLevel
-                ));
-            fNewTurnSoundLevel = std::max(
-                m_fTurnSoundLevel - cfMaxTurnRateOfChange * dwElapsedTime,
-                std::min(
-                    m_fTurnSoundLevel + cfMaxTurnRateOfChange * dwElapsedTime,
-                    fNewTurnSoundLevel
-                ));
-        }
-
-        m_fThrustSoundLevel = fNewThrustSoundLevel;
-        m_fTurnSoundLevel = fNewTurnSoundLevel;
+        m_engineLevels.Update(m_pship, dwElapsedTime * .001f, m_stateLast == wasSilent);
 
         // adjust the pitch of the engines
         if (m_pMainThrusterInteriorSound)
             m_pMainThrusterInteriorSound->GetISoundTweakable()->SetPitch(
-                0.5f + m_fThrustSoundLevel/2);
+                m_engineLevels.MainPitch());
         if (m_pTurnThrusterInteriorSound)
             m_pTurnThrusterInteriorSound->GetISoundTweakable()->SetPitch(
-                0.50f + m_fTurnSoundLevel/3);
+                m_engineLevels.TurnPitch(true));
         if (m_pMainThrusterExteriorSound)
             m_pMainThrusterExteriorSound->GetISoundTweakable()->SetPitch(
-                0.5f + m_fThrustSoundLevel/2);
+                m_engineLevels.MainPitch());
         if (m_pTurnThrusterExteriorSound)
             m_pTurnThrusterExteriorSound->GetISoundTweakable()->SetPitch(
-                0.50f + m_fTurnSoundLevel/2);
+                m_engineLevels.TurnPitch(false));
      }
 
 public:
@@ -1181,14 +874,7 @@ public:
         m_pship(pship),
         SoundSite(pship),
         m_mountLastTurret(NA),
-        m_stateLast(wasSilent),
-        m_fHullFraction(1.0f),
-        m_fAmmoFraction(1.0f),
-        m_fFuelFraction(1.0f),
-        m_fEnergyFraction(1.0f),
-        m_bTryingToFireWeaponWithoutAmmo(false),
-        m_bTryingToUseAfterburnersWithoutFuel(false),
-        m_nRipcordCountdown(11)
+        m_stateLast(wasSilent)
     {
         for (Mount mount = 0; mount < c_maxMountedWeapons; mount++)
         {
@@ -1234,53 +920,10 @@ public:
             }
             bool bIsGunner = bIsPlayersShip && m_mountLastTurret != NA;
         
-            float fNewHullFraction = 1.0f;
-            float fNewAmmoFraction = 1.0f;
-            float fNewFuelFraction = 1.0f;
-            float fNewEnergyFraction = 1.0f;
-            bool fNewFiringWithoutAmmo = false;
-            bool fNewThrustingWithoutFuel = false;
-
             if (bIsPlayersShip)
-            {
-                fNewHullFraction = m_pship->GetFraction();
-                fNewAmmoFraction = m_pship->GetAmmo() 
-                    / (float)m_pship->GetHullType()->GetMaxAmmo();
-                if (m_pship->GetHullType()->GetMaxFuel() > 0)
-                {
-                    fNewFuelFraction = m_pship->GetFuel() 
-                        / m_pship->GetHullType()->GetMaxFuel();
-                }
-                if (m_pship->GetHullType()->GetMaxEnergy() > 0)
-                {
-                    fNewEnergyFraction = m_pship->GetEnergy() 
-                        / m_pship->GetHullType()->GetMaxEnergy();
-                }
-                fNewFiringWithoutAmmo = TryingToFireWeaponWithoutAmmo();
-                fNewThrustingWithoutFuel = TryingToFireAfterburnersWithoutFuel();
-            }
-
-            if (bIsPlayersShip && fNewHullFraction < 0.15f && m_fHullFraction >= 0.15f)
-                trekClient.StartSound(hullLowSound, GetSoundSource());
-            if (bIsPlayersShip && fNewAmmoFraction < 0.15f && m_fAmmoFraction >= 0.15f)
-                trekClient.StartSound(ammoLowSound, GetSoundSource());
-            if (bIsPlayersShip && fNewFuelFraction < 0.15f && m_fFuelFraction >= 0.15f)
-                trekClient.StartSound(fuelLowSound, GetSoundSource());
-            if (bIsPlayersShip && fNewEnergyFraction < 0.05f && m_fEnergyFraction >= 0.05f)
-                trekClient.StartSound(energyLowSound, GetSoundSource());
-            
-            if (!m_bTryingToFireWeaponWithoutAmmo && fNewFiringWithoutAmmo)
-                trekClient.StartSound(salNoAmmoSound, GetSoundSource());
-            if (!m_bTryingToUseAfterburnersWithoutFuel && fNewThrustingWithoutFuel)
-                trekClient.StartSound(salNoFuelSound, GetSoundSource());
-            UpdateRipcordCountdown();
-
-            m_fHullFraction = fNewHullFraction;
-            m_fAmmoFraction = fNewAmmoFraction;
-            m_fFuelFraction = fNewFuelFraction;
-            m_fEnergyFraction = fNewEnergyFraction;
-            m_bTryingToFireWeaponWithoutAmmo = fNewFiringWithoutAmmo;
-            m_bTryingToUseAfterburnersWithoutFuel = fNewThrustingWithoutFuel;
+                m_notifications.Update(trekClient.GetShip(), [&](SoundID id) {
+                    trekClient.StartSound(id, GetSoundSource());
+                });
 
             PlaySoundIf(m_pOutOfBoundsSound, outOfBoundsLoopSound, GetSoundSource(),
                 (trekClient.GetShip()->GetWarningMask() & (c_wmOutOfBounds | c_wmCrowdedSector)) != 0);
@@ -1313,10 +956,10 @@ public:
                     GetSoundSource(), !bIsGunner);
                 PlaySoundIf(m_pMainThrusterInteriorSound, 
                     pht->GetMainThrusterInteriorSound(),
-                    m_psourceEngine, m_fThrustSoundLevel > 0.01f);
+                    m_psourceEngine, m_engineLevels.thrust > 0.01f);
                 PlaySoundIf(m_pTurnThrusterInteriorSound,  
                     pht->GetManuveringThrusterInteriorSound(), GetSoundSource(), 
-                    m_fTurnSoundLevel > 0.01f);
+                    m_engineLevels.turn > 0.01f);
                 PlaySoundIf(m_pAfterburnerInteriorSound, 
                     GetAfterburnerSoundID(true), 
                     m_psourceEngine, AfterburnerPower() > 0.0f);
@@ -1337,10 +980,10 @@ public:
             PlaySoundIf(m_pExteriorSound, pht->GetExteriorSound(), GetSoundSource(), true);
             PlaySoundIf(m_pMainThrusterExteriorSound, 
                 pht->GetMainThrusterExteriorSound(), m_psourceEngine, 
-                m_fThrustSoundLevel > 0.01f);
+                m_engineLevels.thrust > 0.01f);
             PlaySoundIf(m_pTurnThrusterExteriorSound, 
                 pht->GetManuveringThrusterExteriorSound(), GetSoundSource(), 
-                m_fTurnSoundLevel > 0.01f);
+                m_engineLevels.turn > 0.01f);
             PlaySoundIf(m_pAfterburnerExteriorSound,                
                 GetAfterburnerSoundID(false), 
                 m_psourceEngine,
@@ -2068,12 +1711,9 @@ class ThingSiteImpl : public ThingSitePrivate
                     //We, trivially, see anything on our side. beyond that ...  Imago ALLY VISIBILITY 7/11/09
                     //does the ship that saw the object last still see it
                     //(if such a ship exists)
-                    if ( 
-						(trekClient.GetSide() == pmodel->GetSide()) || 
-						(trekClient.GetSide()->AlliedSides(pmodel->GetSide(),trekClient.GetSide()) && trekClient.MyMission()->GetMissionParams().bAllowAlliedViz) ||
-						(m_sideVisibility.pLastSpotter() && m_sideVisibility.pLastSpotter()->InScannerRange(pmodel) && trekClient.GetSide() == m_sideVisibility.pLastSpotter()->GetSide()) ||
-						(m_sideVisibility.pLastSpotter() && (trekClient.GetSide()->AlliedSides(m_sideVisibility.pLastSpotter()->GetSide(),trekClient.GetSide()) && trekClient.GetSide() != m_sideVisibility.pLastSpotter()->GetSide()) && m_sideVisibility.pLastSpotter()->InScannerRange(pmodel) && trekClient.MyMission()->GetMissionParams().bAllowAlliedViz)
-					   )
+                    if (Allegiance::CachedSideEye(trekClient.GetSide(), pmodel,
+                            m_sideVisibility.pLastSpotter(),
+                            trekClient.MyMission()->GetMissionParams().bAllowAlliedViz))
                     {
                         //yes
 						currentEye = true; //Xynth #100 7/2010
@@ -2084,14 +1724,8 @@ class ThingSiteImpl : public ThingSitePrivate
                                 IsideIGC* pside = pmodel->GetSide();
 
 								//this is where you would put in rate limiting for the sound effects if someone "eye" spams };-) -imago
-                                if ((pside != trekClient.GetSide()) && (!pside->AlliedSides(pside,trekClient.GetSide()))) //ALLY Imago 7/3/09
-                                {
-                                    trekClient.PlaySoundEffect(newShipSound, pmodel);
-                                }
-                                else
-                                {
-                                    trekClient.PlaySoundEffect(newEnemySound, pmodel);
-                                }
+                                trekClient.PlaySoundEffect(Allegiance::ShipContactSound(true,
+                                    pside != trekClient.GetSide() && !pside->AlliedSides(pside, trekClient.GetSide())), pmodel);
                             }
                             //Xynth #100 7/2010 m_sideVisibility.fVisible(true);
                         }
@@ -2372,21 +2006,8 @@ class ThingSiteImpl : public ThingSitePrivate
                 m_bPlayedHitSoundThisFrame = true;
 
                 // figure out which sound to play
-                SoundID soundId;
-                if (m_pmodel == trekClient.GetShip()->GetSourceShip())
-                {
-                    if (bAbsorbedByShield)
-                        soundId = myShieldHitSound;
-                    else
-                        soundId = myHullHitSound;                
-                }
-                else
-                {
-                    if (bAbsorbedByShield)
-                        soundId = otherShieldHitSound;
-                    else
-                        soundId = otherHullHitSound;                
-                }
+                SoundID soundId = Allegiance::ShipImpactSound(
+                    m_pmodel == trekClient.GetShip()->GetSourceShip(), bAbsorbedByShield);
 
                 // play the appropriate sound
                 TRef<ISoundPositionSource> psource = GetSoundSource(vectOffset);
@@ -2530,30 +2151,13 @@ void WinTrekClient::Initialize(Time timeNow)
     m_vpimageExplosion[0].Set(3, LoadExplosionImage(AWF_EXPLOSION_03));
     m_vpimageExplosion[0].Set(4, LoadExplosionImage(AWF_EXPLOSION_04));
 
-    m_vpimageExplosion[1].SetCount(1);
-    m_vpimageExplosion[1].Set(0, m_vpimageExplosion[0][3]);
+    for (int type = 1; type < 8; ++type) {
+        int count = Allegiance::ExplosionImageCount(type);
+        m_vpimageExplosion[type].SetCount(count);
+        for (int i = 0; i < count; ++i)
+            m_vpimageExplosion[type].Set(i, m_vpimageExplosion[0][Allegiance::ExplosionImage(type, i)]);
+    }
 
-    m_vpimageExplosion[2].SetCount(1);
-    m_vpimageExplosion[2].Set(0, m_vpimageExplosion[0][0]);
-
-    m_vpimageExplosion[3].SetCount(2);
-    m_vpimageExplosion[3].Set(0, m_vpimageExplosion[0][4]);
-    m_vpimageExplosion[3].Set(1, m_vpimageExplosion[0][1]);
-
-    m_vpimageExplosion[4].SetCount(2);
-    m_vpimageExplosion[4].Set(0, m_vpimageExplosion[0][4]);
-    m_vpimageExplosion[4].Set(1, m_vpimageExplosion[0][1]);
-
-    m_vpimageExplosion[5].SetCount(2);
-    m_vpimageExplosion[5].Set(0, m_vpimageExplosion[0][4]);
-    m_vpimageExplosion[5].Set(1, m_vpimageExplosion[0][2]);
-
-    m_vpimageExplosion[6].SetCount(1);
-    m_vpimageExplosion[6].Set(0, m_vpimageExplosion[0][3]);
-
-    m_vpimageExplosion[7].SetCount(2);
-    m_vpimageExplosion[7].Set(0, m_vpimageExplosion[0][4]);
-    m_vpimageExplosion[7].Set(1, m_vpimageExplosion[0][2]);
 }
 
 TRef<AnimatedImage> WinTrekClient::LoadExplosionImage(const ZString& str)
@@ -2613,37 +2217,7 @@ IpartIGC*   WinTrekClient::GetCargoPart(void)
 
 void    WinTrekClient::NextCargoPart(void)
 {
-    // select a real part or the first empty cargo slot
-    bool bFoundPart = false;
-    do
-    {
-        --mountSelected;
-        if (mountSelected < -c_maxCargo)
-            mountSelected = -1;
-
-        IpartIGC *ppart = GetShip()->GetSourceShip()->GetMountedPart(NA, mountSelected);
-        IpartTypeIGC *ppartType = ppart ? ppart->GetPartType() : NULL;
-
-        bFoundPart = true;
-
-        // If this is ammo/missiles/etc, is this the first instance of this part?
-        ObjectType ot = ppart ? ppart->GetObjectType() : NA;
-        if (ppart == NULL || ot == OT_pack || ot == OT_magazine || ot == OT_dispenser)
-        {
-            for (Mount mountPrev = mountSelected + 1; mountPrev < 0; ++mountPrev)
-            {
-                IpartIGC *ppartPrev = GetShip()->GetSourceShip()->GetMountedPart(NA, mountPrev);
-                IpartTypeIGC *ppartTypePrev = ppartPrev ? ppartPrev->GetPartType() : NULL;
-
-                if (ppartType == ppartTypePrev)
-                {
-                    bFoundPart = false;
-                    break;
-                }
-            }
-        }
-    }
-    while (!bFoundPart);
+    mountSelected = Allegiance::NextCargoMount(GetShip()->GetSourceShip(), mountSelected);
 }
 Mount     WinTrekClient::GetSelectedCargoMount() 
 { 
@@ -2671,43 +2245,7 @@ void      WinTrekClient::OnReload(IpartIGC* ppart, bool bConsumed)
 }
 bool      WinTrekClient::SelectCargoPartOfType(EquipmentType et, PartMask maxPartMask, IpartTypeIGC* pptNotThis)
 {
-    IpartIGC* ppartStart = GetCargoPart();
-        
-    if (ppartStart && (
-               (ppartStart->GetEquipmentType() != et) ||
-               ((ppartStart->GetPartType()->GetPartMask() & ~maxPartMask) != 0) ||
-               (ppartStart->GetPartType() == pptNotThis))
-        || (!ppartStart && !pptNotThis))
-    {
-        IpartIGC* ppart;
-
-        do
-        {
-            NextCargoPart();                    
-            ppart = GetCargoPart();
-        }
-        while (ppart != ppartStart
-            &&  (
-                ppart && (
-                    ppart->GetEquipmentType() != et
-                    || ((ppart->GetPartType()->GetPartMask() & ~maxPartMask) != 0)
-                    || ppart->GetPartType() == pptNotThis)
-                || (!ppart && !pptNotThis)
-            )
-            );
-
-        if (ppart == ppartStart)
-        {
-            // no part in cargo found
-            return false;
-        }
-
-        return true;
-    }
-    else
-    {
-        return true;
-    }
+    return Allegiance::SelectCargoType(GetShip()->GetSourceShip(), mountSelected, et, maxPartMask, pptNotThis);
 }
 
 void WinTrekClient::LoadoutChangeEvent(IshipIGC* pship, IpartIGC* ppart, LoadoutChange lc)
@@ -2764,20 +2302,7 @@ void WinTrekClient::ChangeCluster(IshipIGC*  pship, IclusterIGC* pclusterOld, Ic
             }
         }
 
-        // if we have a command to go to this cluster, clear the command.
-        for (Command i = 0; i < c_cmdMax; i++)
-        {
-            ImodelIGC* ptarget = pship->GetCommandTarget(i);
-            
-            // if this command has a cluster buoy in this cluster...
-            if (ptarget && ptarget->GetObjectType() == OT_buoy 
-                && ((IbuoyIGC*)ptarget)->GetBuoyType() == c_buoyCluster
-                && ((IbuoyIGC*)ptarget)->GetCluster() == pclusterNew)
-            {
-                // clear the command
-                pship->SetCommand(i, NULL, c_cidNone);
-            }
-        }
+        Allegiance::ClearArrivedSectorOrders(pship, pclusterNew);
 
         // notify the UI of the change
         GetWindow()->SetCluster(pclusterNew);
@@ -2925,46 +2450,11 @@ void WinTrekClient::OverrideCamera(ImodelIGC*  pmodel)
     GetWindow()->OverrideCamera(trekClient.m_now, pmodel, false);
 }
 
-void WinTrekClient::TargetKilled(ImodelIGC*  pmodel)
+void WinTrekClient::TargetKilled(ImodelIGC* pmodel)
 {
-    ImodelIGC*  pmodelCurrent = trekClient.GetShip()->GetCommandTarget(c_cmdCurrent);
-    if (pmodel == pmodelCurrent)
-    {
-        IshipIGC*   pshipSource = trekClient.GetShip()->GetSourceShip();
-        if (pshipSource->GetCluster())
-        {
-            extern int GetSimilarTargetMask(ImodelIGC*  pmodel);
-            int mask = GetSimilarTargetMask(pmodel) | c_ttNearest;
-
-            int abm;
-            if (mask == (c_ttShip | c_ttEnemy | c_ttNearest))
-                abm = c_habmRescue;
-            else
-                abm = 0;
-
-            ImodelIGC*  pmodelTarget = FindTarget(pshipSource,
-                                                  mask,
-                                                  pmodel, NULL, NULL, NULL, abm);
-            if ((pmodelTarget == NULL) && abm)
-            {
-                pmodelTarget = FindTarget(pshipSource,
-                                          mask,
-                                          pmodel, NULL, NULL, NULL, c_habmMiner | c_habmBuilder);
-
-                if (pmodelTarget == NULL)
-                    pmodelTarget = FindTarget(pshipSource,
-                                              mask,
-                                              pmodel);
-            }
-
-            if (pmodelTarget == pmodel)
-                pmodelTarget = NULL;
-
-            GetWindow()->SetTarget(pmodelTarget, c_cidDefault);
-            if (trekClient.autoPilot() && (trekClient.GetShip()->GetCommandTarget(c_cmdPlan) == pmodel))
-                trekClient.SetAutoPilot(true);
-        }
-    }
+    Allegiance::TargetKilled(trekClient.GetShip(), pmodel,
+        [&](ImodelIGC* target, CommandID command) { GetWindow()->SetTarget(target, command); },
+        [&]() { trekClient.SetAutoPilot(true); });
 }
 
 void WinTrekClient::ShipWarped(IshipIGC*    pship, 
@@ -3834,26 +3324,9 @@ void WinTrekClient::StationTypeCompleted(IbucketIGC * pbucket, IstationIGC* psta
 
 void WinTrekClient::BuildStation(IasteroidIGC* pasteroid, IsideIGC* pside, IstationTypeIGC* pstationtype, Time now, bool pbseensides[])
 {
-    DataStationIGC  ds;
-    strcpy(ds.name, pstationtype->GetName());
-    ds.clusterID    = pasteroid->GetCluster()->GetObjectID();
-    ds.position     = pasteroid->GetPosition();
-    ds.forward      = pasteroid->GetOrientation ().GetForward ();
-    ds.up           = pasteroid->GetOrientation ().GetUp ();
-    ds.rotation.axis(ds.forward);
-    ds.rotation.angle(0.0f);
-    ds.sideID        = pside->GetObjectID();
-    ds.stationID     = m_pCoreIGC->GenerateNewStationID();
-    ds.stationTypeID = pstationtype->GetObjectID();
-
-    ds.bpHull = pasteroid->GetFraction();
-    ds.bpShield = 0.0f;
-
-    pasteroid->Terminate();
-
-    IstationIGC * pstationNew = (IstationIGC *) (m_pCoreIGC->CreateObject(now, OT_station, &ds, sizeof(ds)));
-    assert (pstationNew);
-    pstationNew->Release();
+    IstationIGC* station = Allegiance::BuildOfflineStation(pasteroid, pside, pstationtype, now);
+    assert(station);
+    if (station) station->Release();
 }
 
 void WinTrekClient::LayExpendable(Time now, IexpendableTypeIGC* pet, IshipIGC* pshipLayer)
@@ -3957,37 +3430,10 @@ bool WinTrekClient::UseRipcord(IshipIGC* pship, ImodelIGC*  pmodel)
     assert (pmodel);
     if (!m_fm.IsConnected())
     {
-        if (pmodel->GetObjectType() == OT_station)
-            ((IstationIGC*)pmodel)->Launch(pship);
-        else
-        {
-            //debug
-            const char* name = pship->GetName();
-            const char* modelName = pmodel->GetName();
-            float r1 = pship->GetRadius();
-            float r2 = pmodel->GetRadius();
-            //
+        Allegiance::ApplyRipcordArrival(pship, pmodel,
+            m_pCoreIGC->GetFloatConstant(c_fcidExitStationSpeed),
+            []() { return Vector::RandomDirection(); });
 
-            float   r = pmodel->GetRadius() + pship->GetRadius() + 25.0f;
-            Vector  v = Vector::RandomDirection();
-            Orientation o(v);
-
-            IclusterIGC*    pcluster = pmodel->GetCluster();
-            Time    lastUpdate = pcluster->GetLastUpdate();
-
-            pship->SetPosition(pmodel->GetPosition() + v * r);
-            pship->SetVelocity(v * trekClient.m_pCoreIGC->GetFloatConstant(c_fcidExitStationSpeed));
-            pship->SetOrientation(o);
-            pship->SetCurrentTurnRate(c_axisYaw, 0.0f);
-            pship->SetCurrentTurnRate(c_axisPitch, 0.0f);
-            pship->SetCurrentTurnRate(c_axisRoll, 0.0f);
-
-            pship->SetLastUpdate(lastUpdate);
-            pship->SetBB(lastUpdate, lastUpdate, 0.0f); 
-
-            pship->SetCluster(pcluster);
-        }
-        
         if (pship == trekClient.GetShip()) {
             trekClient.PlaySoundEffect(jumpSound, static_cast<ImodelIGC*>(pship)); //Not using trekClient's PlaySoundEffect messes up system sound over time. Persistent after quiting Allegiance.
             trekClient.PostText(true, "");
@@ -4181,48 +3627,9 @@ bool WinTrekClient::LandOnCarrierEvent(IshipIGC* pshipCarrier, IshipIGC* pship, 
                 pshield->SetFraction(1.0f);
         }
 
-        const Orientation&  orientation = pshipCarrier->GetOrientation();
-
-        float   vLaunch = m_pCoreIGC->GetFloatConstant(c_fcidExitStationSpeed);
-
-        Vector  position = pshipCarrier->GetPosition();
-        Vector  velocity = pshipCarrier->GetVelocity();
-
-        position.x += random(-0.5f, 0.5f);
-        position.y += random(-0.5f, 0.5f);
-        position.z += random(-0.5f, 0.5f);
-
-        IhullTypeIGC*   phtCarrier = pshipCarrier->GetBaseHullType();
-
-        Orientation         orientationBfr;
-        const Orientation*  porientation;
-        if (phtCarrier->GetLaunchSlots() == 0)
-        {
-            position -= orientation.GetBackward() * (pshipCarrier->GetRadius() + pship->GetRadius() + vLaunch * 0.5f);
-            velocity -= orientation.GetBackward() * vLaunch;
-
-            porientation = &orientation;
-        }
-        else
-        {
-            short   slot = pshipCarrier->GetLaunchSlot();
-
-            position += phtCarrier->GetLaunchPosition(slot) * orientation;
-
-            Vector  forward = phtCarrier->GetLaunchDirection(slot) * orientation;
-
-            position += forward * (pship->GetRadius() + vLaunch * 0.5f);
-            velocity += forward * vLaunch;
-
-            orientationBfr = orientation;
-            orientationBfr.TurnTo(forward);
-
-            porientation = &orientationBfr;
-        }
-
-        pship->SetPosition(position);
-        pship->SetVelocity(velocity);
-        pship->SetOrientation(*porientation);
+        Allegiance::LaunchFromCarrier(pshipCarrier, pship,
+            m_pCoreIGC->GetFloatConstant(c_fcidExitStationSpeed),
+            [](float low, float high) { return random(low, high); });
 
         IclusterIGC*    pcluster = pship->GetCluster();
         pcluster->RecalculateCollisions(tCollision, pship, NULL);
@@ -4232,15 +3639,7 @@ bool WinTrekClient::LandOnCarrierEvent(IshipIGC* pshipCarrier, IshipIGC* pship, 
             OverrideCamera(pshipCarrier);
         }
 
-        if (pship->GetAutopilot()) {
-            if (pship->GetCommandTarget(c_cmdAccepted) == (ImodelIGC*)pshipCarrier && pship->GetCommandID(c_cmdAccepted) == c_cidGoto) {
-                pship->SetCommand(c_cmdAccepted, pshipCarrier, c_cidDefend);
-                if (pship->GetPilotType() >= c_ptPlayer)
-                    pship->SetCommand(c_cmdPlan, pshipCarrier, c_cidDefend);
-            }
-            else
-                pship->SetCommand(c_cmdPlan, NULL, c_cidNone); // drones will do c_cmdAccepted
-        }
+        Allegiance::ResumeAfterCarrier(pshipCarrier, pship);
     }
     return true; 
 }
@@ -4325,10 +3724,8 @@ void WinTrekClient::KillStationEvent(IstationIGC* pStation, ImodelIGC* pLauncher
             ? c_etLargeStation
             : c_etSmallStation);
 
-        if (pStation->GetSide() == trekClient.GetSide())
-            trekClient.PlaySoundEffect(pStation->GetStationType()->GetDestroyedSound());
-        else
-            trekClient.PlaySoundEffect(pStation->GetStationType()->GetEnemyDestroyedSound());
+        trekClient.PlaySoundEffect(Allegiance::StationDestroyedSound(
+            pStation->GetStationType(), pStation->GetSide() == trekClient.GetSide()));
 
         trekClient.PostText(true, START_COLOR_STRING "%s" END_COLOR_STRING " has destroyed " START_COLOR_STRING "%s's %s" END_COLOR_STRING,
             (PCC)ConvertColorToString(pLauncher ? pLauncher->GetSide()->GetColor() : Color::White()),
@@ -4374,37 +3771,9 @@ void WinTrekClient::HitWarpEvent(IshipIGC* ship, IwarpIGC* warp)
             ship->SetCluster(cluster);
 
             {
-                Orientation alephOrientation = destination->GetOrientation();
-                const Vector&   v = ship->GetVelocity();
-                float           speed2 = v.LengthSquared();
-                float           speed  = float(sqrt(speed2));
-                float           error;
-                {
-                    //How close is the ship coming to the center of the warp?
-                    Vector          dp = warp->GetPosition() - ship->GetPosition();
-
-                    float   t = (dp * v) / v.LengthSquared();
-                    float   d = (dp - t * v).LengthSquared();
-                    float   r = warp->GetRadius();
-
-                    error = d / (r*r) + 0.125f;      //Error ranges from 0.125 to 1.125
-                }
-
-                alephOrientation.Pitch(random(-error, error));
-                alephOrientation.Yaw(random(-error, error));
-
-                ship->SetCurrentTurnRate(c_axisRoll,
-                                         ship->GetCurrentTurnRate(c_axisRoll) +
-                                         random(pi * 0.5f * error, pi * 2.0f * error));
-                const Vector&   backward = alephOrientation.GetBackward();
-                ship->SetOrientation(alephOrientation);
-
-                speed = -(speed + trekClient.m_pCoreIGC->GetFloatConstant(c_fcidExitWarpSpeed));
-                ship->SetVelocity(backward * speed);
-                ship->SetPosition(destination->GetPosition() +
-                                  (alephOrientation.GetUp() * random(2.0f, 5.0f)) +
-                                  (alephOrientation.GetRight() * random(2.0f, 5.0f)) -
-                                  (ship->GetRadius() + 5.0f) * backward);
+                Allegiance::ApplyOfflineWarpExit(ship, warp, destination,
+                    trekClient.m_pCoreIGC->GetFloatConstant(c_fcidExitWarpSpeed),
+                    [](float low, float high) { return random(low, high); });
                 if (ship == trekClient.GetShip())
                     trekClient.PlaySoundEffect(jumpSound, static_cast<ImodelIGC*>(ship));
 
@@ -4525,33 +3894,12 @@ void      WinTrekClient::ReceiveChat(IshipIGC*   pshipSender,
         {
             GetWindow()->PlaySonicChat(idSonicChat, 0);
         }
-        else if (idSonicChat != NA)
-        {
-            PlaySoundEffect(idSonicChat);
-        }
-        else if ((cid != c_cidNone) && (ctRecipient != CHAT_INDIVIDUAL_ECHO))
-        {
-            PlaySoundEffect(newCommandMsgSound);
-        }
-        else if (CHAT_INDIVIDUAL == ctRecipient
-            && ((NA == oidRecipient) || (trekClient.GetShipID() == oidRecipient)))
-        {
-            if (Training::IsTraining())
-                PlaySoundEffect(newChatMsgFromCommanderSound);
-            else
-                PlaySoundEffect(newPersonalMsgSound);
-        }
         else
         {
-            if (m_fm.IsConnected())
-            {
-                if (bIsLeader && (pshipSender != trekClient.GetShip()))
-                    PlaySoundEffect(newChatMsgFromCommanderSound);
-                else
-                    PlaySoundEffect(newChatMsgSound);
-            }
-            else
-                PlaySoundEffect(newOfflineChatMsgSound);
+            PlaySoundEffect(Allegiance::ChatSound(idSonicChat, cid != c_cidNone,
+                ctRecipient == CHAT_INDIVIDUAL_ECHO,
+                ctRecipient == CHAT_INDIVIDUAL && (oidRecipient == NA || oidRecipient == GetShipID()),
+                Training::IsTraining(), m_fm.IsConnected(), bIsLeader && pshipSender != GetShip()));
         }
     }
 
@@ -4728,10 +4076,7 @@ void      WinTrekClient::ReceiveChat(IshipIGC*   pshipSender,
             strSender = pshipSender->GetName();
             color = pshipSender->GetSide()->GetColor();
 
-            if ((pshipSender == trekClient.GetShip()) && !bForMe)
-                color = color * 0.75f;
-            else if (cid == c_cidNone)
-                color = color * 0.85f;
+            color = color * Allegiance::ChatTintScale(pshipSender == trekClient.GetShip(), bForMe, cid != c_cidNone);
         }
         else
         {
@@ -4776,13 +4121,12 @@ void      WinTrekClient::ReceiveChat(IshipIGC*   pshipSender,
             }
         }
 
-        if ((cid == c_cidNone) ||
-            (ctRecipient == CHAT_INDIVIDUAL_ECHO) ||
-            ((bForMe && (ctRecipient == CHAT_INDIVIDUAL)) == (pshipSender != trekClient.GetShip())))
+        if (Allegiance::RecordChat(cid != c_cidNone, ctRecipient == CHAT_INDIVIDUAL_ECHO,
+                                  bForMe, ctRecipient == CHAT_INDIVIDUAL, pshipSender == trekClient.GetShip()))
         {
 
             // make sure we limit the number of chats
-            int nMaxChats = 600;
+            int nMaxChats = int(Allegiance::ChatHistoryCapacity);
             while (trekClient.GetChatList()->n() >= nMaxChats)
             {
                 assert(trekClient.GetChatList()->n() == nMaxChats);
@@ -4884,8 +4228,8 @@ void      WinTrekClient::ReceiveChat(IshipIGC*   pshipSender,
 					//Xynth #14 7/2010
 					PlayerInfo* ppi = (PlayerInfo*)(pshipSender->GetPrivateData());					
 
-                    if ((cid == c_cidPickup) && (pmodelTarget == pshipSender) &&
-                        pshipSender->  GetBaseHullType()->HasCapability(c_habmRescue))
+                    if (Allegiance::RecoveryOrderTip(cid == c_cidPickup, pmodelTarget == pshipSender,
+                        [&] { return pshipSender->GetBaseHullType()->HasCapability(c_habmRescue); }))
                     {
                         trekClient.PostText(true, "New orders from %s: prepare for recovery. Press [insert] to accept.", 
                                             (const char*)strSender);
@@ -4968,7 +4312,7 @@ void WinTrekClient::PlaySoundEffect(SoundID soundID, ImodelIGC* model, const Vec
 
 void WinTrekClient::PlayNotificationSound(SoundID soundID, ImodelIGC* model)
 {
-    if (model == GetShip() || model == GetShip()->GetSourceShip())
+    if (Allegiance::ReceivesShipNotification(GetShip(), model))
     {
         TRef<ISoundPositionSource> psource = model ? 
             ((ThingSiteImpl*)model->GetThingSite())->GetSoundSource() : NULL;
@@ -5016,8 +4360,7 @@ void WinTrekClient::UpdateAmbientSounds(DWORD dwElapsedTime)
             m_psoundAmbient = NULL;
         }
 
-        bool bPlayMissileWarning = false;
-        float fBestLock = 0.0f;
+        Allegiance::IncomingMissileWarning missileWarning;
 
         IclusterIGC* pcluster = GetCluster();
         
@@ -5034,18 +4377,12 @@ void WinTrekClient::UpdateAmbientSounds(DWORD dwElapsedTime)
                 {
                     ImissileIGC* pmissile = (ImissileIGC*)(pmodel);
 
-                    if (pmissile->GetTarget() == trekClient.GetShip()->GetSourceShip())
-                    {
-                        bPlayMissileWarning = true;
-
-                        if (pmissile->GetLock() > fBestLock)
-                            fBestLock = pmissile->GetLock();
-                    }
+                    missileWarning.Observe(pmissile, trekClient.GetShip()->GetSourceShip());
                 }
             }
         }
 
-        if (bPlayMissileWarning && trekClient.GetShip()->GetCluster())
+        if (missileWarning.active && trekClient.GetShip()->GetCluster())
         {
             if (!m_psoundMissileWarning)
             {
@@ -5056,7 +4393,7 @@ void WinTrekClient::UpdateAmbientSounds(DWORD dwElapsedTime)
                 }
             }
 
-            m_psoundMissileWarning->GetISoundTweakable()->SetPitch(0.75 + fBestLock/2);
+            m_psoundMissileWarning->GetISoundTweakable()->SetPitch(missileWarning.Pitch());
         }
         else if (m_psoundMissileWarning)
         {

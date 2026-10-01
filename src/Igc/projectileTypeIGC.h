@@ -22,6 +22,9 @@
 class CprojectileTypeIGC : public IprojectileTypeIGC
 {
     public:
+#ifdef ALLEGIANCE_NATIVE
+        void NativeSetStaticOwner(ImissionIGC* owner) override { m_pMission = owner; }
+#endif
         CprojectileTypeIGC(void)
         {
         }

@@ -8,7 +8,7 @@
 #define _assert_h_
 
 #include <memory>
-#include <windows.h>
+#include "platform.h"
 
 #include "Logger.h"
 
@@ -18,6 +18,9 @@
 //
 //////////////////////////////////////////////////////////////////////////////
 
+#if defined(assert) && defined(ALLEGIANCE_NATIVE)
+#undef assert
+#endif
 #ifdef assert
 #error "Don't use assert.h, zlib provides assert functionality."
 #endif

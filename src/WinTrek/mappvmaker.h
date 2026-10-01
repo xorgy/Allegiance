@@ -14,6 +14,7 @@
 #define __MAPPVMAKER_H_
 class CMapPVCluster;
 class ImissionPV;
+class Modeler;
 
 #include "mapmakerigc.h"
 
@@ -58,6 +59,9 @@ public:
 	float GetScreenY() { return m_data.screenY;}
 	int *GetStationsPerSide() { return nStationsPerSide;}
 	bool GetHomeSector(void) const { return m_data.bHomeSector; }
+#ifdef ALLEGIANCE_NATIVE
+    const char* GetName() const { return m_data.name; }
+#endif
 };
 
 typedef Slist_utl<CMapPVCluster*> ClusterPVList;
@@ -632,5 +636,3 @@ class CmapPVMakerSplitBase : public CmapPVMaker
 } ;
 
 #endif //__MAPPVMAKER_H_
-
-

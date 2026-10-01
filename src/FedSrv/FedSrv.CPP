@@ -10,6 +10,14 @@
 
 
 #include "pch.h"
+#include "../ClientCore/StationTeleport.h"
+#include "../ClientCore/PlayerEconomy.h"
+#include "../ClientCore/CarrierLoadout.h"
+#include "../ClientCore/ShipOrders.h"
+#include "../ClientCore/FlagLifecycle.h"
+#include "../ClientCore/ShipSound.h"
+#include "../ClientCore/ShipCrew.h"
+#include "../ClientCore/ShipLifecycle.h"
 #include <..\TCLib\CoInit.h>
 #include <..\TCLib\AutoHandle.h>
 #include <agc.h>
@@ -2344,63 +2352,7 @@ bool    BoardShip(CFSShip* pfsShip, IshipIGC*  pshipBoard)
                   (pshipBoard->GetCluster() == NULL) &&
                   (pstationBoard != NULL))))
             {
-                Mount   turret;
-                {
-                    Mount   minMount = phtBoard->GetMaxFixedWeapons();
-                    Mount   maxMount = phtBoard->GetMaxWeapons();
-                    if (minMount == maxMount)
-                        turret = NA;
-                    else
-                    {
-                        Mount startMount = pship->GetTurretID();
-                        if (startMount == NA)
-                            startMount = maxMount - 1;
-                        else
-                            assert (pship->GetParentShip() != NULL);
-
-                        turret = startMount;
-                        while (true)
-                        {
-                            turret++;
-
-                            if (turret >= maxMount)
-                                turret = minMount;
-
-                            //Is this position occupied?
-                            ShipLinkIGC*   psl;
-                            for (psl = pshipBoard->GetChildShips()->first();
-                                 (psl != NULL);
-                                 psl = psl->next())
-                            {
-                                if (psl->data()->GetTurretID() == turret)
-                                    break;
-                            }
-
-							//Is this position equipped? Turkey 07/10 #145
-							PartLinkIGC*   ppl;
-                            for (ppl = pshipBoard->GetParts()->first();
-                                 (ppl != NULL);
-                                 ppl = ppl->next())
-                            {
-                                if (ppl->data()->GetMountID() == turret)
-                                    break;
-                            }
-
-                            if (psl == NULL && ppl != NULL) //end #145
-                            {
-                                //Not occupied, is equipped
-                                break;
-                            }
-
-                            if (turret == startMount)
-                            {
-                                //No available slots ... become an observer
-                                turret = NA;
-                                break;
-                            }
-                        }
-                    }
-                }
+                Mount turret = Allegiance::NextTurret(pship, pshipBoard);
 
                 //Prevent anyone from becoming an observer unless they can cheat
                 if ((turret != NA) || pfsShip->GetPlayer()->CanCheat())
@@ -3291,34 +3243,8 @@ bool CommandToDrone(CFSMission*         pfsMission,
                                             */
         }
 
-        // Remember player commands by storing location/ID in c_cmdQueued
-        if (pshipTo->GetPilotType() == c_ptMiner) {
-            if ((*ppmodelTarget) &&
-                (*ppmodelTarget)->GetObjectType() != OT_station &&
-                (*ppmodelTarget)->GetObjectType() != OT_ship)
-            {
-                DataBuoyIGC         buoyData;
-                buoyData.position = Vector(0.0f, 0.0f, 0.0f);
-                buoyData.type = c_buoyWaypoint; // c_buoyCluster would be deleted as soon as we are in the cluster
-                if (pminerCluster)
-                    buoyData.clusterID = pminerCluster->GetObjectID();
-                else
-                    buoyData.clusterID = (*ppmodelTarget)->GetCluster()->GetObjectID();
-                buoyData.buoyID = pfsMission->GetIGCMission()->GenerateNewBuoyID();
-                ImodelIGC* buoy = (ImodelIGC*)(pfsMission->GetIGCMission()->CreateObject(g.timeNow, OT_buoy, &buoyData, sizeof(buoyData)));
+        Allegiance::RememberMinerOrder(pshipTo, *ppmodelTarget, g.timeNow, pminerCluster);
 
-                CommandID cid = c_cidGoto;
-                if (pminerCluster)
-                    cid = c_cidJoin;
-                pshipTo->SetCommand(c_cmdQueued, buoy, cid);
-
-                buoy->Release(); //SetCommand added the consumer needed
-            }
-            else {
-                // Remember that we just got a player command -> c_cidGoto instead of None
-                pshipTo->SetCommand(c_cmdQueued, NULL, c_cidGoto);
-            }
-        }
     }
 
     return bAccepted;
@@ -5372,28 +5298,8 @@ HRESULT FedSrvSiteBase::OnAppMessage(FedMessaging * pthis, CFMConnection & cnxnF
         break;
       }
 
-      IshipIGC* pshipAD = pfsPlayer->GetIGCShip()->GetAutoDonate();
-      if ((!pshipAD) || (((CFSShip*)(pshipAD->GetPrivateData()))->GetMoney() < pfmRequest->amount))
-      {
-          //Not autodonating to anyone ... find the person on the team with the most money
-          Money     moneyMax = pfmRequest->amount - 1;
-
-          IsideIGC* pside = pfsPlayer->GetSide();
-          for (ShipLinkIGC* psl = pside->GetShips()->first(); (psl != NULL); psl = psl->next())
-          {
-              IshipIGC* pship = psl->data();
-              if (pship != pfsPlayer->GetIGCShip())
-              {
-                  CFSShip*  pfsship = (CFSShip*)(pship->GetPrivateData());
-
-                  if (pfsship->GetMoney() > moneyMax)
-                  {
-                      moneyMax = pfsship->GetMoney();
-                      pshipAD = pship;
-                  }
-              }
-          }
-      }
+      IshipIGC* pshipAD = Allegiance::MoneyRequestRecipient(pfsPlayer->GetIGCShip(), pfmRequest->amount,
+          [](IshipIGC* ship) { return ((CFSShip*)(ship->GetPrivateData()))->GetMoney(); });
 
       if (pshipAD)
       {
@@ -7044,7 +6950,7 @@ HRESULT FedSrvSiteBase::OnAppMessage(FedMessaging * pthis, CFMConnection & cnxnF
             IshipIGC*           pshipParent = pfsPlayer->GetIGCShip()->GetParentShip();
             if (pshipParent == NULL)
             {
-                const ShipListIGC*  pshipsChildren = pfsPlayer->GetIGCShip()->GetChildShips();
+                bool newHull = false;
 
                 IstationIGC*    pstation;
                 if ((pfmDocked->stationID == NA) && !pfsPlayer->GetIGCShip()->IsGhost())
@@ -7060,9 +6966,7 @@ HRESULT FedSrvSiteBase::OnAppMessage(FedMessaging * pthis, CFMConnection & cnxnF
 
 
 
-                    if ((pstation == NULL) ||
-                        ( (pstation->GetSide() != pside && !pside->AlliedSides(pside,pstation->GetSide()))) || //#ALLY REARM 7/8/09 7/9/09
-                        (!pstation->GetStationType()->HasCapability(c_sabmRestart)))
+                    if (!Allegiance::CanTeleportToStation(pside, pstation))
                     {
                         //Not a legitimate station to start at ... ignore the request
                         pfmAck->stationID = NA;
@@ -7073,62 +6977,29 @@ HRESULT FedSrvSiteBase::OnAppMessage(FedMessaging * pthis, CFMConnection & cnxnF
                     }
 
                     pfmAck->stationID = pfmDocked->stationID;
-                    pfmAck->bNewHull = !pstation->CanBuy(pfsPlayer->GetIGCShip()->GetBaseHullType());
+                    pfmAck->bNewHull = newHull = !pstation->CanBuy(pfsPlayer->GetIGCShip()->GetBaseHullType());
                     g.fm.SendMessages(pfsPlayer->GetConnection(), FM_GUARANTEED, FM_FLUSH);
 
-                    if (pfmAck->bNewHull)
-                    {
-                        //Switch to a lifepod
-                        {
-                            //Boot any kids
-                            ShipLinkIGC*    psl;
-                            while (psl = pshipsChildren->first()) //intentional
-                                LeaveShip((CFSShip*)(psl->data()->GetPrivateData()), pfsPlayer->GetIGCShip());
-                        }
+                }
 
-                        //Credit the player with the appropriate money
-                        Money refund = pfsPlayer->GetIGCShip()->GetValue();
-                        assert(refund >= 0);
+                Allegiance::ApplyStationTeleport(pfsPlayer->GetIGCShip(), pstation, newHull,
+                    [&](IshipIGC* child) { LeaveShip((CFSShip*)child->GetPrivateData(), pfsPlayer->GetIGCShip()); },
+                    [&](Money refund) {
+                        BEGIN_PFM_CREATE(g.fm, pfmMoney, S, MONEY_CHANGE)
+                        END_PFM_CREATE
 
-                        if (refund > 0)
-                        {
-                            BEGIN_PFM_CREATE(g.fm, pfmMoney, S, MONEY_CHANGE)
-                            END_PFM_CREATE
+                        pfmMoney->sidTo = pfsPlayer->GetShipID();
+                        pfmMoney->sidFrom = NA;
+                        pfmMoney->dMoney = refund;
 
-                            pfmMoney->sidTo = pfsPlayer->GetShipID();
-                            pfmMoney->sidFrom = NA;
-                            pfmMoney->dMoney = refund;
+                        pfsPlayer->SetMoney(pfsPlayer->GetMoney() + refund);
 
-                            pfsPlayer->SetMoney(pfsPlayer->GetMoney() + refund);
-
-                            g.fm.SendMessages(CFSSide::FromIGC(pside)->GetGroup(), FM_GUARANTEED, FM_FLUSH);
-                        }
-
-                        //Sell off any parts
-                        {
-                            const PartListIGC*  ppartsList = pfsPlayer->GetIGCShip()->GetParts();
-                            PartLinkIGC*        ppl;
-                            while (ppl = ppartsList->first())       //Intentional
-                                ppl->data()->Terminate();
-                        }
-
-                        //Switch to a lifepod
-                        IhullTypeIGC*   pht = pside->GetCivilization()->GetLifepod();
-                        pfsPlayer->GetIGCShip()->SetBaseHullType(pht);
-
+                        g.fm.SendMessages(CFSSide::FromIGC(pside)->GetGroup(), FM_GUARANTEED, FM_FLUSH);
+                    },
+                    [&](IhullTypeIGC* pod) {
                         ShipStatus* pss = pfsPlayer->GetShipStatus(pside->GetObjectID());
-                        pss->SetHullID(pht->GetObjectID());
-                    }
-                }
-
-                //Move the children of this ship to the station as well
-                for (ShipLinkIGC*   psl = pshipsChildren->first();
-                     (psl != NULL);
-                     psl = psl->next())
-                {
-                    psl->data()->SetStation(pstation);
-                }
-                pfsPlayer->GetIGCShip()->SetStation(pstation);
+                        pss->SetHullID(pod->GetObjectID());
+                    });
             }
         }
     }
@@ -11732,25 +11603,9 @@ void FedSrvSiteBase::KillShipEvent(Time timeCollision, IshipIGC* pship, ImodelIG
         SideID sidFlag = pship->GetFlag();
         if (sidFlag != NA)
         {
-            pship->SetFlag(NA);
-
-            const Vector&   p = pship->GetPosition();
-            float           lm = pmission->GetFloatConstant(c_fcidLensMultiplier);
-            float           r = 1.5f * pmission->GetFloatConstant(c_fcidRadiusUniverse);
-            if (p.x*p.x + p.y*p.y + p.z*p.z/(lm*lm) > r*r)
-            {
-                RespawnFlag(sidFlag,NULL); // mmf 11/07 added second argument pside (which is set to null in this case)
-            }
-            else
-            {
-                DataTreasureIGC dt;
-                dt.treasureCode = c_tcFlag;
-                dt.treasureID = sidFlag;
-                dt.amount = 0;
-                dt.lifespan = 3600.0f * 24.0f * 10.0f;      //10 days
-                dt.createNow = false;
-                CreateTreasure(timeCollision, pship, &dt, p1, 100.0f);
-            }
+            if (!Allegiance::DropShipFlag(pship, timeCollision, p1,
+                                        []() { return Vector::RandomDirection(); }))
+                RespawnFlag(sidFlag, NULL);
 
             BEGIN_PFM_CREATE(g.fm, pfmGain, S, GAIN_FLAG)
             END_PFM_CREATE
@@ -12106,32 +11961,7 @@ void FedSrvSiteBase::DamageShipEvent(Time now, IshipIGC* ship, ImodelIGC* launch
 
                     if (pside != psideLauncher) //&& !pside->AlliedSides(pside,psideLauncher))  //ALLY -imago 7/3/09 reverted
 					{
-                        SoundID underAttackSound;
-
-                        switch (ship->GetPilotType())
-                        {
-                            case c_ptCarrier:
-                                underAttackSound = carrierUnderAttackSound;
-                                break;
-
-                            case c_ptMiner:
-                                if (ship->GetFraction() < 0.5f)
-                                  underAttackSound = minerCriticalSound;
-                                else
-                                  underAttackSound = minerUnderAttackSound;
-                                break;
-
-                            case c_ptBuilder:
-                                underAttackSound =
-                                    ((IstationTypeIGC*)(IbaseIGC*)(ship->GetBaseData()))
-                                        ->GetConstructorUnderAttackSound();
-                                break;
-
-                            default:
-                            case c_ptLayer:
-                                underAttackSound = droneUnderAttackSound;
-                                break;
-                        }
+                        SoundID underAttackSound = Allegiance::DroneUnderAttackSound(ship);
 						
 						//ChatTarget ct = (pside->GetAllies() == NA) ? CHAT_TEAM : CHAT_ALLIES; //ALLY imago 7/12/09 reverted 7/22/09
 						Color AllianceColors[3] = { Color::Green(), Color::Orange(), Color::Red() };						
@@ -12586,182 +12416,11 @@ void FedSrvSiteBase::WarpBombEvent(IwarpIGC* pwarp, ImissileIGC* pmissile)
     */
 }
 
-static void RefillPart(IshipIGC* pship, IpartIGC* ppart, const TechTreeBitMask&   ttbm)
-{
-    IpartTypeIGC*   pptBase = ppart->GetPartType();
-    if (pptBase->GetRequiredTechs() <= ttbm)
-    {
-        IpartTypeIGC*   ppt = pptBase;
-
-        while (true)
-        {
-            IpartTypeIGC*   pptNext = ppt->GetSuccessorPartType();
-            if (pptNext && (pptNext->GetRequiredTechs() <= ttbm))
-                ppt = pptNext;
-            else
-                break;
-        }
-
-        short   newAmount = (ppart->GetPrice() == 0)
-                            ? SHRT_MAX
-                            : ppart->GetAmount();
-
-        if (ppt == pptBase)
-        {
-            //Things that don't care about amounts wont care if I try and set it.
-            ppart->SetAmount(newAmount);
-        }
-        else
-        {
-            Mount   oldMount = ppart->GetMountID();
-            ppart->Terminate();
-            pship->CreateAndAddPart(ppt, oldMount, newAmount);
-        }
-    }
-}
-
-static bool MatchPT(IpartTypeIGC* ppt1, IpartTypeIGC* ppt2)
-{
-    do
-    {
-        if (ppt1 == ppt2)
-            return true;
-
-        ppt1 = ppt1->GetSuccessorPartType();
-    }
-    while (ppt1);
-
-    return false;
-}
-
-static void ErasePart(IshipIGC* pship, EquipmentType et, Mount mount, IpartTypeIGC*  ptDesired[c_maxCargo + 3])
-{
-    IpartIGC*   ppart = pship->GetMountedPart(et, mount);
-    if (ppart)
-    {
-        IpartTypeIGC*   ppt = ppart->GetPartType();
-        //Go through the list of parts and nuke one that corresponds to this part
-        for (int i = 0; (i < c_maxCargo + 3); i++)
-        {
-            if (ptDesired[i] && MatchPT(ptDesired[i], ppt))
-            {
-                ptDesired[i] = NULL;
-                break;
-            }
-        }
-    }
-}
-
 void FedSrvSiteBase::AlliedRearm(IshipIGC* pship, bool bLaunch) { //Imago 8/10/09 ALLY
     //RIPPED FROM LAND ON CARRIER EVENT 7/9/09 
 
     CFSPlayer*  pfsPlayer = ((CFSShip*)(pship->GetPrivateData()))->GetPlayer();
-    ImissionIGC*    pMission = pship->GetMission();
-    TechTreeBitMask  ttbm = pship->GetSide()->GetDevelopmentTechs() | pship->GetSide()->GetBuildingTechs();
-
-    //Now ... go through the players ship and restore the expendables that are
-    //free and partially gone
-    {
-        //refill parts backwards so that newly added parts will not be revisited
-        PartLinkIGC*    ppl = pship->GetParts()->last();
-        while (ppl)
-        {
-            IpartIGC*   ppart = ppl->data();
-            ppl = ppl->txen();
-
-            if (ppart)
-                RefillPart(pship, ppart, ttbm);
-        }
-    }
-
-    //Copy the list of desired parts
-    IpartTypeIGC*   ptDesired[c_maxCargo + 3];      //Must be kept sync'd with
-    memcpy(ptDesired, pfsPlayer->GetDesiredLoadout(), sizeof(ptDesired));
-
-    //Go through and fill any holes with the desired parts
-    {
-        ErasePart(pship, ET_Magazine, 0, ptDesired);
-        ErasePart(pship, ET_Dispenser, 0, ptDesired);
-        ErasePart(pship, ET_ChaffLauncher, 0, ptDesired);
-        for (Mount i = 0; (i < c_maxCargo); i++)
-            ErasePart(pship, NA, -1 - i, ptDesired);
-    }
-
-    {
-        IpartTypeIGC*   ptFuel = (pship->GetMountedPart(ET_Afterburner, 0) != NULL)
-                                 ? pMission->GetFuelPack()
-                                 : NULL;
-
-        IpartTypeIGC*   ptAmmo = NULL;
-        {
-            for (Mount i = pship->GetHullType()->GetMaxWeapons() - 1; (i >= 0); i--)
-            {
-                IweaponIGC* pw = (IweaponIGC*)(pship->GetMountedPart(ET_Weapon, i));
-                if (pw && (pw->GetAmmoPerShot() != 0))
-                {
-                    ptAmmo = pMission->GetAmmoPack();
-                    break;
-                }
-            }
-        }
-
-        bool    bBuyFuel = true;
-
-        int     iDesired = 0;
-        for (Mount i = 0; (i < c_maxCargo); i++)
-        {
-            IpartIGC*   ppart = pship->GetMountedPart(NA, -1 - i);
-            if (ppart == NULL)
-            {
-                //Shove an instance of the first part left in the
-                //desired part list into the slot
-                while (iDesired < c_maxCargo + 3)
-                {
-                    IpartTypeIGC*   pt = ptDesired[iDesired++];
-
-                    if (pt && (pt->GetRequiredTechs() <= ttbm))
-                    {
-                        while (true)
-                        {
-                            IpartTypeIGC*   ptNext = pt->GetSuccessorPartType();
-                            if (ptNext && (ptNext->GetRequiredTechs() <= ttbm))
-                                pt = ptNext;
-                            else
-                                break;
-                        }
-
-                        ppart = pship->CreateAndAddPart(pt, -1 - i, SHRT_MAX);
-                        assert (ppart->GetPrice() == 0);
-                        break;
-                    }
-                }
-
-                if (ppart == NULL)
-                {
-                    if (bBuyFuel && ptFuel)
-                    {
-                        pship->CreateAndAddPart(ptFuel, -1 - i, SHRT_MAX);
-                        bBuyFuel = (ptAmmo == NULL);
-                    }
-                    else if (ptAmmo)
-                    {
-                        pship->CreateAndAddPart(ptAmmo, -1 - i, SHRT_MAX);
-                        bBuyFuel = true;
-                    }
-                }
-            }
-        }
-    }
-
-    pship->SetAmmo(SHRT_MAX);
-    pship->SetFuel(FLT_MAX);
-    pship->SetEnergy(pship->GetHullType()->GetMaxEnergy());
-    pship->SetFraction(1.0f);
-    {
-        IshieldIGC* pshield = (IshieldIGC*)(pship->GetMountedPart(ET_Shield, 0));
-        if (pshield)
-            pshield->SetFraction(1.0f);
-    }
+    Allegiance::RearmAtAlliedStation(pship, pfsPlayer->GetDesiredLoadout());
 
     //IMAGO ALLY 7/10/09 REARM
     // tell the client what happened
@@ -12815,144 +12474,8 @@ bool FedSrvSiteBase::LandOnCarrierEvent(IshipIGC* pshipCarrier, IshipIGC* pship,
 {
     CFSShip* pfsShip = (CFSShip*)pship->GetPrivateData();
 
-    ImissionIGC*    pMission = pship->GetMission();
-    TechTreeBitMask  ttbm = pship->GetSide()->GetDevelopmentTechs() | pship->GetSide()->GetBuildingTechs();
-
-    //Now ... go through the ship and restore the expendables that are
-    //free and partially gone
-    {
-        //refill parts backwards so that newly added parts will not be revisited
-        PartLinkIGC*    ppl = pship->GetParts()->last();
-        while (ppl)
-        {
-            IpartIGC*   ppart = ppl->data();
-            ppl = ppl->txen();
-
-            if (ppart)
-                RefillPart(pship, ppart, ttbm);
-        }
-    }
-
-    if (pfsShip->IsPlayer()) {
-        //Copy the list of desired parts
-        IpartTypeIGC*   ptDesired[c_maxCargo + 3];      //Must be kept sync'd with
-        memcpy(ptDesired, pfsShip->GetPlayer()->GetDesiredLoadout(), sizeof(ptDesired));
-
-        //Go through and fill any holes with the desired parts
-        {
-            ErasePart(pship, ET_Magazine, 0, ptDesired);
-            ErasePart(pship, ET_Dispenser, 0, ptDesired);
-            ErasePart(pship, ET_ChaffLauncher, 0, ptDesired);
-            for (Mount i = 0; (i < c_maxCargo); i++)
-                ErasePart(pship, NA, -1 - i, ptDesired);
-        }
-
-        {
-            IpartTypeIGC*   ptFuel = (pship->GetMountedPart(ET_Afterburner, 0) != NULL)
-                ? pMission->GetFuelPack()
-                : NULL;
-
-            IpartTypeIGC*   ptAmmo = NULL;
-            {
-                for (Mount i = pship->GetHullType()->GetMaxWeapons() - 1; (i >= 0); i--)
-                {
-                    IweaponIGC* pw = (IweaponIGC*)(pship->GetMountedPart(ET_Weapon, i));
-                    if (pw && (pw->GetAmmoPerShot() != 0))
-                    {
-                        ptAmmo = pMission->GetAmmoPack();
-                        break;
-                    }
-                }
-            }
-
-            bool    bBuyFuel = true;
-
-            // Remount launcher parts if they are depleted AaronMoore 1/10 (Imago)
-            for (int i = 0; i < 3; i++)
-            {
-                if ((i == 0 && pship->GetMountedPart(ET_Magazine, 0) == NULL) ||
-                    (i == 1 && pship->GetMountedPart(ET_Dispenser, 0) == NULL) ||
-                    (i == 2 && pship->GetMountedPart(ET_ChaffLauncher, 0) == NULL))
-                {
-                    IpartTypeIGC*   pt = ptDesired[i];
-
-                    if (pt)
-                    {
-                        // Upgrade part if posible
-                        while (true)
-                        {
-                            IpartTypeIGC*   ptNext = pt->GetSuccessorPartType();
-                            if (ptNext && (ptNext->GetRequiredTechs() <= ttbm))
-                                pt = ptNext;
-                            else
-                                break;
-                        }
-                        pship->CreateAndAddPart(pt, 0, SHRT_MAX);
-
-                        // Remove this part from the desired list so it is not added again into cargo
-                        ptDesired[i] = NULL;
-                    }
-                }
-            }
-            //end AaaronMoore 1/10
-
-
-            int     iDesired = 0;
-            for (Mount i = 0; (i < c_maxCargo); i++)
-            {
-                IpartIGC*   ppart = pship->GetMountedPart(NA, -1 - i);
-                if (ppart == NULL)
-                {
-                    //Shove an instance of the first part left in the
-                    //desired part list into the slot
-                    while (iDesired < c_maxCargo + 3)
-                    {
-                        IpartTypeIGC*   pt = ptDesired[iDesired++];
-
-                        if (pt && (pt->GetRequiredTechs() <= ttbm))
-                        {
-                            while (true)
-                            {
-                                IpartTypeIGC*   ptNext = pt->GetSuccessorPartType();
-                                if (ptNext && (ptNext->GetRequiredTechs() <= ttbm))
-                                    pt = ptNext;
-                                else
-                                    break;
-                            }
-
-                            ppart = pship->CreateAndAddPart(pt, -1 - i, SHRT_MAX);
-                            assert(ppart->GetPrice() == 0);
-                            break;
-                        }
-                    }
-
-                    if (ppart == NULL)
-                    {
-                        if (bBuyFuel && ptFuel)
-                        {
-                            pship->CreateAndAddPart(ptFuel, -1 - i, SHRT_MAX);
-                            bBuyFuel = (ptAmmo == NULL);
-                        }
-                        else if (ptAmmo)
-                        {
-                            pship->CreateAndAddPart(ptAmmo, -1 - i, SHRT_MAX);
-                            bBuyFuel = true;
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    pship->SetAmmo(SHRT_MAX);
-    pship->SetFuel(FLT_MAX);
-    pship->SetEnergy(pship->GetHullType()->GetMaxEnergy());
-    pship->SetFraction(1.0f);
-    {
-        IshieldIGC* pshield = (IshieldIGC*)(pship->GetMountedPart(ET_Shield, 0));
-        if (pshield)
-            pshield->SetFraction(1.0f);
-    }
+    ImissionIGC* pMission = pship->GetMission();
+    Allegiance::RearmAtCarrier(pship, pfsShip->IsPlayer() ? pfsShip->GetPlayer()->GetDesiredLoadout() : NULL);
 
     const Orientation&  orientation = pshipCarrier->GetOrientation();
 
@@ -13063,14 +12586,7 @@ bool FedSrvSiteBase::RescueShipEvent(IshipIGC* pshipRescued, IshipIGC* pshipResc
   ((CFSShip*)(pshipRescued->GetPrivateData()))->ResetWarpState();
 
   //Find the closest space station and put the rescued ship there  
-  IstationIGC*    pstation = (IstationIGC*)FindTarget(pshipRescued,
-                                                      (c_ttStation | c_ttFriendly | c_ttAnyCluster | c_ttNearest),
-                                                      NULL, NULL, NULL, NULL, c_sabmRestart);
-  //imago ALLY 7/13/09
-  if (pstation == NULL)
-	  pstation = m_pfsMission->GetBase(((CFSShip*)(pshipRescued->GetPrivateData()))->GetPlayer()->GetSide());
-  else if (pstation->GetSide() != ((CFSShip*)(pshipRescued->GetPrivateData()))->GetPlayer()->GetSide())
-	  pstation = m_pfsMission->GetBase(((CFSShip*)(pshipRescued->GetPrivateData()))->GetPlayer()->GetSide());
+  IstationIGC* pstation = Allegiance::SelectRestartStation(pshipRescued);
 
 
   return pstation ? DockWithStationEvent(pshipRescued, pstation) : false;
@@ -13097,9 +12613,7 @@ bool FedSrvSiteBase::DockWithStationEvent(IshipIGC* pship, IstationIGC* pstation
   IsideIGC* psideOld = pstation->GetSide();
 
   
-  if ((pside != psideOld) && (pship->GetHullType() && pship->GetHullType()->HasCapability(c_habmBoard)) && 
-      (!pside->AlliedSides(pside,psideOld) || 
-      pship->GetMission()->GetMissionParams()->bAllowFriendlyFire)) //#ALLY 7/3/09 8/10/09 imago
+  if (Allegiance::ShouldBoardStation(pship, pstation)) //#ALLY 7/3/09 8/10/09 imago
   {
       pfsShip->CaptureStation(pstation);
   }
@@ -13839,107 +13353,15 @@ void        FedSrvSiteBase::LayExpendable(Time                   now,
     KillShipEvent(now, pshipLayer, NULL, 0.0f, position, Vector::GetZero());
 }
 
-void    FedSrvSiteBase::RespawnFlag(SideID  sidFlag, IsideIGC* pcapturersside) // mmf 11/07 added second argument pside of capturer
+void FedSrvSiteBase::RespawnFlag(SideID sidFlag, IsideIGC* pcapturersside)
 {
-    //Don't respawn flags that have just been picked up by a ship
-    if (sidFlag != NA)
+    if (!Allegiance::RespawnFlag(m_pfsMission->GetIGCMission(), g.timeNow, sidFlag,
+                               [](int low, int high) { return randomInt(low, high); }) &&
+        pcapturersside && sidFlag != SIDE_TEAMLOBBY)
     {
-        if (sidFlag == SIDE_TEAMLOBBY)
-        {
-            //Legal clusters are any neutral cluster without a flag
-            const int       c_maxClusters = 100;
-            IclusterIGC*    pclusters[c_maxClusters];
-            int             nClusters = 0;
-
-            for (ClusterLinkIGC*    pcl = m_pfsMission->GetIGCMission()->GetClusters()->first();
-                 (pcl != NULL);
-                 pcl = pcl->next())
-            {
-                IclusterIGC*   pcluster = pcl->data();
-                if (!pcluster->GetHomeSector())
-                {
-                    assert (nClusters < c_maxClusters);
-                    pclusters[nClusters++] = pcluster;
-                }
-            }
-
-            assert (nClusters != 0);
-
-            m_pfsMission->GetIGCMission()->GenerateTreasure(g.timeNow, pclusters[randomInt(0, nClusters - 1)], -2);
-        }
-        else
-        {
-            IsideIGC*   pside = m_pfsMission->GetIGCMission()->GetSide(sidFlag);
-            assert(pside);
-
-            //Legal clusters are any neutral cluster without a flag
-            const int       c_maxStations = 10;
-            IstationIGC*    pstations[c_maxStations];
-            int             nStations = 0;
-
-            for (StationLinkIGC* psl = pside->GetStations()->first(); (psl != NULL); psl = psl->next())
-            {
-                IstationIGC*    pstation = psl->data();
-                if (pstation->GetStationType()->HasCapability(c_sabmPedestal))
-                {
-                    //Is there a flag within spitting distance?
-                    const float c_spittingDistance = 300.0f;
-                    TreasureLinkIGC*   ptl;
-                    for (ptl = pstation->GetCluster()->GetTreasures()->first(); (ptl != NULL); ptl = ptl->next())
-                    {
-                        ItreasureIGC*   pt = ptl->data();
-                        if ((pt->GetTreasureCode() == c_tcFlag) && (pt->GetTreasureID() == sidFlag))
-                        {
-                            float   d = (pt->GetPosition() - pstation->GetPosition()).LengthSquared();
-                            if (d < c_spittingDistance * c_spittingDistance)
-                                break;
-                        }
-                    }
-
-                    if (ptl == NULL)
-                    {
-                        assert (nStations < c_maxStations);
-                        pstations[nStations++] = pstation;
-                    }
-                }
-            }
-            // assert (nStations > 0); mmf 11/07 commented this out as this can happen in 'only one side' games
-
-			// mmf 11/07 add if nStations == 0
-			//     If the side that the flag belongs to has no bases AND one of their flags was captured
-			//     the side that captured it wins.
-			//     Otherwise don't spawn a flag (there is no base to get a position for).
-			//     It is unlikely this second case will occur but best to cover it just incase.
-			if (nStations == 0) {
-				if (pcapturersside != NULL) {
-					static char szReason[100];	//Make this static so we only need to keep a pointer to it around
-					sprintf(szReason,"%s wins. Team owning captured flag has no stations left.",
-                      pcapturersside->GetName());
-					m_pfsMission->GameOver(pcapturersside, szReason);
-				}
-			} else {
-				IstationIGC*    pstation = pstations[randomInt(0, nStations - 1)];
-				DataTreasureIGC dt;
-	            dt.treasureCode = c_tcFlag;
-	            dt.treasureID = sidFlag;
-	            dt.amount = 0;
-				dt.clusterID = pstation->GetCluster()->GetObjectID();
-				dt.lifespan = 10.0f * 24.0f * 3600.0f;
-				dt.createNow = false;
-
-				dt.objectID = m_pfsMission->GetIGCMission()->GenerateNewTreasureID();
-
-				dt.p0 = pstation->GetPosition();
-	            dt.p0.z += pstation->GetRadius() + c_fFlagOffset;
-				dt.v0 = Vector::GetZero();
-				dt.time0 = g.timeNow;
-
-				ItreasureIGC* t = (ItreasureIGC *)m_pfsMission->GetIGCMission()->CreateObject(g.timeNow, OT_treasure,
-                                                                                          &dt, sizeof(dt));
-				assert (t);
-				t->Release();
-			}
-		}
+        static char szReason[100];
+        sprintf(szReason, "%s wins. Team owning captured flag has no stations left.", pcapturersside->GetName());
+        m_pfsMission->GameOver(pcapturersside, szReason);
     }
 }
 
@@ -13982,47 +13404,10 @@ IshipIGC*   PickNewLeader(const ShipListIGC*    pships,
                           IshipIGC*             pshipIgnore,
                           int                   maxVotes)
 {
-    struct Contender
-    {
-        IshipIGC* pship;
-        int       nVotes;
-    };
-
-    Contender*    pcontenders = new Contender[pships->n()];
-    int           nContenders = 0;
-
-    IshipIGC*     pshipMax = NULL;
-    for (ShipLinkIGC* psl = pships->first(); (psl != NULL); psl = psl->next())
-    {
-        IshipIGC* pshipAD = psl->data()->GetAutoDonate();
-        if (pshipAD && (pshipAD != pshipIgnore))
-        {
-            int   i;
-            for (i = 0; (i < nContenders); i++)
-            {
-                if (pcontenders[i].pship == pshipAD)
-                {
-                    pcontenders[i].nVotes++;
-                    break;
-                }
-            }
-
-            if (i == nContenders)
-            {
-                pcontenders[nContenders].pship = pshipAD;
-                pcontenders[nContenders++].nVotes = 1;
-            }
-
-            if (pcontenders[i].nVotes > maxVotes)
-            {
-                maxVotes = pcontenders[i].nVotes;
-                pshipMax = pcontenders[i].pship;
-            }
-        }
-    }
-    delete pcontenders;
-
-    return pshipMax;
+    Allegiance::LeaderContender* contenders = new Allegiance::LeaderContender[pships->n()];
+    IshipIGC* result = Allegiance::PickDonationLeader(pships, pshipIgnore, maxVotes, contenders);
+    delete[] contenders;
+    return result;
 }
 /*-------------------------------------------------------------------------
  * FedSrvApp

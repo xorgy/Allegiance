@@ -7,6 +7,9 @@
 #ifndef _PCH_H_
 #define _PCH_H_
 
+#ifdef ALLEGIANCE_NATIVE
+#include "../native/training_host.hpp"
+#else
 #define __MODULE__ "Training"
 
 // BT - STEAM
@@ -89,5 +92,8 @@
 #define bit_and &
 #define bit_or  |
 #define not     !
+
+#endif // ALLEGIANCE_NATIVE
+#include "Clock.h"
 
 #endif

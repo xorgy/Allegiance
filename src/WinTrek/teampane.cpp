@@ -1,4 +1,5 @@
 #include "pch.h"
+#include "../ClientCore/PlayerPanePresentation.h"
 #include "training.h"
 #include "badwords.h"
 //#include "imagetransform.h"
@@ -513,33 +514,8 @@ public:
 
     static Color GetSideUIColor(SideID sideID)
     {
-        switch (sideID)
-        {
-        case 0:
-            return Color(152/256.0f, 108/256.0f, 15/256.0f);
-
-        case 1:
-            return Color(11/256.0f, 26/256.0f, 119/256.0f);
-
-        case 2:
-            return Color(130/256.0f, 15/256.0f, 103/256.0f);
-
-        case 3:
-            return Color(27/256.0f, 143/256.0f, 16/256.0f);
-
-        case 4:
-            return Color(146/256.0f, 13/256.0f, 18/256.0f);
-
-        case 5:
-            return Color(57/256.0f, 207/256.0f, 132/256.0f);
-
-        default:
-            // WLP 2005 - allow viewing NOAT lobby team - re-use case 5
-           // assert(false);
-           // return Color(0.5, 0.5, 0.5);
-
-           return Color(131/256.0f, 131/256.0f, 140/256.0f); // yp your_persona march 14 2006 : NOATcolor patch change color from teal to NOAT grey.
-        }
+        auto color = Allegiance::PlayerSideColor(sideID);
+        return Color(color[0], color[1], color[2]);
     }
     
     public:

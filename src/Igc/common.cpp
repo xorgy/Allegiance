@@ -919,8 +919,15 @@ IwarpIGC* FindPath(IshipIGC*    pship,
             IwarpIGC*   pwarp = wLink->data();
             if (pship->CanSee(pwarp))
             {
+#ifdef ALLEGIANCE_NATIVE
+                IwarpIGC* destination = pwarp->GetDestination();
+                if (!destination || !destination->GetCluster())
+                    continue;
+                IclusterIGC* pclusterDestination = destination->GetCluster();
+#else
                 assert (pwarp->GetDestination());
                 IclusterIGC*    pclusterDestination = pwarp->GetDestination()->GetCluster();
+#endif
                 if ((!bCowardly) ||
                     (pclusterTarget == pclusterDestination) ||
                     IsFriendlyCluster(pclusterDestination, pside))
@@ -969,7 +976,17 @@ IwarpIGC* FindPath(IshipIGC*    pship,
         const Path& path = plinkClosest->data();
         IwarpIGC*   pwarp = path.pwarp;
 
+#ifdef ALLEGIANCE_NATIVE
+        IwarpIGC* destination = pwarp->GetDestination();
+        if (!destination || !destination->GetCluster())
+        {
+            delete plinkClosest;
+            continue;
+        }
+        IclusterIGC* pclusterNext = destination->GetCluster();
+#else
         IclusterIGC*    pclusterNext = pwarp->GetDestination()->GetCluster();
+#endif
         if (pclusterNext == pclusterTarget)
         {
             //Found a path to the target
@@ -986,7 +1003,14 @@ IwarpIGC* FindPath(IshipIGC*    pship,
 
             if (pship->CanSee(pwarp))
             {
+#ifdef ALLEGIANCE_NATIVE
+                IwarpIGC* destination = pwarp->GetDestination();
+                if (!destination || !destination->GetCluster())
+                    continue;
+                IclusterIGC* pclusterDestination = destination->GetCluster();
+#else
                 IclusterIGC*    pclusterDestination = pwarp->GetDestination()->GetCluster();
+#endif
 
                 if ((!bCowardly) ||
                     (pclusterDestination == pclusterTarget) ||
@@ -1710,12 +1734,21 @@ bool    Dodge(IshipIGC*     pship,
 
     ImodelIGC*  pmodelCollide = NULL;
     float       tCollide = FLT_MAX;
+#ifdef ALLEGIANCE_NATIVE
+    const auto* candidates=pcluster->GetDodgeCandidates(pship,tMax,bShipsOnly);
+    size_t candidate=0;
+    for (ModelLinkIGC* pml=candidates?nullptr:(bShipsOnly?(ModelLinkIGC*)pcluster->GetShips()->first():pcluster->GetPickableModels()->first());
+         candidates?candidate<candidates->size():pml!=nullptr;
+         candidates?void(++candidate):void(pml=pml->next())) {
+        ImodelIGC* pmodel=candidates?(*candidates)[candidate]:pml->data();
+#else
     for (ModelLinkIGC*  pml = (bShipsOnly
                                ? (ModelLinkIGC*)(pcluster->GetShips()->first())
                                : pcluster->GetPickableModels()->first());
          (pml != NULL); pml = pml->next())
     {
         ImodelIGC*  pmodel = pml->data();
+#endif
         if ((pmodel != pship) &&
             (pmodel != pmodelIgnore) &&
             (pmodel->GetHitTest()->GetNoHit() != myHitTest))
@@ -1752,6 +1785,10 @@ bool    Dodge(IshipIGC*     pship,
                     {
                         pmodelCollide = pmodel;
                         tCollide = t;
+#ifdef ALLEGIANCE_NATIVE
+                        // The first zero-time impact already wins every tie.
+                        if(t==0.0f)break;
+#endif
                     }
                 }
             }
@@ -1851,6 +1888,9 @@ bool    GotoPlan::SetControls(float  dt, bool bDodge, ControlData*  pcontrols, i
             if (m_wpTarget.m_pmodelTarget &&
                 (m_wpTarget.m_objective == Waypoint::c_oEnter) &&
                 (m_wpTarget.m_pmodelTarget->GetObjectType() == OT_warp) &&
+#ifdef ALLEGIANCE_NATIVE
+                (static_cast<IwarpIGC*>(m_wpTarget.m_pmodelTarget)->GetDestination() != NULL) &&
+#endif
                 (((IwarpIGC*)(m_wpTarget.m_pmodelTarget))->GetDestination()->GetCluster() == pcluster))
             {
                 m_wpTarget.Reset();
@@ -2128,11 +2168,20 @@ bool    GotoPlan::SetControls(float  dt, bool bDodge, ControlData*  pcontrols, i
 
                 ImodelIGC*      pmodelDivert = NULL;
 
+#ifdef ALLEGIANCE_NATIVE
+                const auto* candidates=pcluster->GetPathCandidates(m_pship,positionGoto,2+divertOffset);
+                size_t candidate=0;
+                for(ModelLinkIGC* pml=candidates?nullptr:pcluster->GetPickableModels()->first();
+                    candidates?candidate<candidates->size():pml!=nullptr;
+                    candidates?void(++candidate):void(pml=pml->next())) {
+                    ImodelIGC* pmodel=candidates?(*candidates)[candidate]:pml->data();
+#else
                 for (ModelLinkIGC*  pml = pcluster->GetPickableModels()->first();
                      (pml != NULL);
                      pml = pml->next())
                 {
                     ImodelIGC*  pmodel = pml->data();
+#endif
                     if ((pmodel != m_pship) &&
                         (pmodel != pmodelSkip) &&
                         !Ignore(m_pship, pmodel))
@@ -2264,7 +2313,11 @@ if (d2 < dMax2)             //Object is closer that our goal
                             //Are we headed through a minefield?
                             IsideIGC*   mySide = m_pship->GetSide();
 
+#ifdef ALLEGIANCE_NATIVE
+                            for (ModelLinkIGC* pml=(ModelLinkIGC*)pcluster->GetMines()->first();
+#else
                             for (ModelLinkIGC*  pml = pcluster->GetPickableModels()->first();
+#endif
                                  (pml != NULL);
                                  pml = pml->next())
                             {
@@ -2900,7 +2953,7 @@ static IstationIGC* CreatePedestalAndFlag(ImissionIGC*     pmission,
 {
     Time            now = pmission->GetLastUpdate();
 
-    DataStationIGC ds;
+    DataStationIGC ds = {};
 
     ds.clusterID = clusterID;
     ds.position = position;
@@ -2934,7 +2987,7 @@ static IstationIGC* CreatePedestalAndFlag(ImissionIGC*     pmission,
                                                                      sizeof(ds)));
     assert(pstation);
 
-    DataTreasureIGC dt;
+    DataTreasureIGC dt = {};
     dt.treasureCode = c_tcFlag;
     dt.treasureID = sideID;
     dt.amount = 0;

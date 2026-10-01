@@ -22,6 +22,9 @@
 class CmineTypeIGC : public ImineTypeIGC
 {
     public:
+#ifdef ALLEGIANCE_NATIVE
+        void NativeSetStaticOwner(ImissionIGC* owner) override { m_pMission = owner; }
+#endif
         CmineTypeIGC(void)
         {
         }

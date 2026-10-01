@@ -1,4 +1,20 @@
 #include "pch.h"
+#include "../ClientCore/AimIndicator.h"
+#include "../ClientCore/ClientSoundEvents.h"
+#include "../ClientCore/RadarPresentation.h"
+#include "../ClientCore/PlayerCommands.h"
+#include "../ClientCore/QueuedRequests.h"
+#include "../ClientCore/WeaponSelection.h"
+#include "../ClientCore/Targeting.h"
+#include "../ClientCore/Joystick.h"
+#include "../ClientCore/KeyboardSteering.h"
+#include "../ClientCore/Throttle.h"
+#include "../ClientCore/FlightControls.h"
+#include "../ClientCore/Inventory.h"
+#include "../ClientCore/CameraMotion.h"
+#include "../ClientCore/CameraFraming.h"
+#include "../ClientCore/CameraZoom.h"
+#include "../ClientCore/ShipCrew.h"
 
 #include <shellapi.h>
 #include "cmdview.h"
@@ -77,11 +93,11 @@ const float c_fCommandGridRadius = 7500.0f;
 
 const float s_fCommandViewDisplacementMax = 10000.0f;
 
-const float s_fExternalViewDistanceMax = 6000.0f;
-const float s_fExternalViewDistanceMin = 100.0f;
-const float s_fExteralViewDistanceDefault = 500.0f;
+const float s_fExternalViewDistanceMax = Allegiance::ChaseMotion::DistanceMax;
+const float s_fExternalViewDistanceMin = Allegiance::ChaseMotion::DistanceMin;
+const float s_fExteralViewDistanceDefault = Allegiance::ChaseMotion::DistanceDefault;
 
-const float c_dtRejectQueuedCommand = 15.0f;
+const float c_dtRejectQueuedCommand = Allegiance::QueuedRequestLifetime;
 
 const float c_fVolumeDelta = 1;
 const float c_fFFGainDelta = 100; //Imago 7/10 #187
@@ -122,17 +138,7 @@ struct  JoystickResults
 float   GetThrottle(ImodelIGC*  pmodel)
 {
     assert (pmodel);
-    if (trekClient.GetShip()->GetParentShip() == NULL)
-    {
-        float speed      = pmodel->GetVelocity().Length();
-        float myMaxSpeed = trekClient.GetShip()->GetHullType()->GetMaxSpeed();
-
-        return (speed >= myMaxSpeed)
-               ? 1.0f
-               : ((2.0f * speed / myMaxSpeed) - 1.0f);
-    }
-    else
-        return 0.0f;
+    return Allegiance::MatchTargetThrottle(trekClient.GetShip(), pmodel);
 }
 
 //////////////////////////////////////////////////////////////////////////////
@@ -264,381 +270,102 @@ ImodelIGC*  GetCurrentTarget(void)
     return pmodelTarget;
 }
 
-int   GetSimilarTargetMask(ImodelIGC* pmodel)
+
+
+// Windows renderer adapter for the shared client camera behavior.
+class CameraControl : public Allegiance::CameraMotion
 {
-    assert (pmodel);
+  public:
+    CameraControl() : Allegiance::CameraMotion(s_fDefaultFOV)
+    {
+    }
+    void SetCameras(Camera *pcamera, Camera *pcameraPosters /*, Camera* pcameraTurret*/)
+    {
+        m_pcamera = pcamera;
+        m_pcameraPosters = pcameraPosters;
+        // m_pcameraTurret          = pcameraTurret;
 
-    ObjectType  type = pmodel->GetObjectType();
+        SetZClip(5.0f, 10000.0f);
 
-    int tt = GetTypebits(type);
-    if ((type == OT_ship) || (type == OT_station) || (type == OT_probe))
-		tt |= ((trekClient.GetShip()->GetSide() == pmodel->GetSide()) || IsideIGC::AlliedSides(trekClient.GetShip()->GetSide(), pmodel->GetSide())) // #ALLY -was: == imago fixed 7/8/09
-              ? c_ttFriendly
-              : c_ttEnemy;
-    else
-        tt |= c_ttAllSides;
+        m_pcameraPosters->SetZClip(10, 10000);
+        // m_pcameraTurret->SetZClip(0.5, 10000);
 
-    return tt;
-}
+        m_pcameraTarget->SetZClip(1, 20);
+        m_pcamera->SetFOV(s_fDefaultFOV);
+        m_pcameraTarget->SetPosition(Vector(0, 0, 8.0f));
+    }
 
-//This class wraps all the functionality for controlling a camera'a position, orientation, field of view & orientation
-class   CameraControl
-{
-    public:
-        CameraControl(void)
-        :
-            m_dtAnimate(0.0f),
-            m_jiggle(0.0f),
-            m_fov(s_fDefaultFOV),
-            m_oldHeadYaw(0.0f)
+    void SetZClip(float zMin, float zMax)
+    {
+        m_pcamera->SetZClip(zMin, zMax);
+    }
+
+    bool Apply(float dt, bool bJiggle, bool bTarget)
+    {
+        IshipIGC *source = trekClient.GetShip()->GetSourceShip();
+        IafterburnerIGC *afterburner = (IafterburnerIGC *)source->GetMountedPart(ET_Afterburner, 0);
+        ImodelIGC *warp = bJiggle ? FindTarget(source, c_ttWarp | c_ttNearest | c_ttAllSides) : NULL;
+        float range =
+            warp ? (warp->GetPosition() - source->GetPosition()).Length() - trekClient.GetShip()->GetRadius()
+                 : 0;
+        bool animatingF = Allegiance::CameraMotion::Apply(
+            dt, bJiggle, afterburner != NULL, afterburner ? afterburner->GetPower() : 0, range,
+            warp ? warp->GetRadius() : 0, [](float low, float high) { return random(low, high); });
+        m_pcamera->SetPosition(GetPosition());
+        m_pcamera->SetOrientation(GetViewOrientation());
+        m_pcameraPosters->SetOrientation(GetViewOrientation());
+        if (bTarget)
         {
-            m_orientationHead.Reset();
-        }
+            ImodelIGC *pmodelTarget = GetCurrentTarget();
 
-        ~CameraControl(void)
-        {
-        }
-
-        void    SetHeadOrientation(float    yaw)
-        {
-            if (yaw != m_oldHeadYaw)
+            if (pmodelTarget != NULL)
             {
-                m_oldHeadYaw = yaw;
-                m_orientationHead.Reset();
-                m_orientationHead.Yaw(-yaw);
-            }
-        }
+                Orientation orientTarget = GetTargetOrientation(pmodelTarget->GetPosition());
 
-        const Orientation&  GetHeadOrientation(void) const
-        {
-            return m_orientationHead;
-        }
-
-        void SetCameras(Camera* pcamera, Camera* pcameraPosters/*, Camera* pcameraTurret*/)
-        {
-            m_pcamera                = pcamera;
-            m_pcameraPosters         = pcameraPosters;
-            //m_pcameraTurret          = pcameraTurret;
-
-            SetZClip(5.0f, 10000.0f);
-
-            m_pcameraPosters->SetZClip(10, 10000);
-            //m_pcameraTurret->SetZClip(0.5, 10000);
-
-            m_pcameraTarget->SetZClip(1, 20);
-            m_pcamera->SetFOV(s_fDefaultFOV);
-            m_pcameraTarget->SetPosition(Vector(0, 0, 8.0f));
-        }
-
-        void    SetZClip(float  zMin, float zMax)
-        {
-            m_pcamera->SetZClip(zMin, zMax);
-        }
-
-        bool    Apply(float dt, bool bJiggle, bool bTarget)
-        {
-            bool    animatingF = false;
-            if (m_dtAnimate > 0.0f)
-            {
-                float   tNext = m_tnowAnimate + dt;
-                if (tNext >= m_dtAnimate)
-                {
-                    //but the animation has finished
-                    if (m_bAnimatePosition)
-                        m_position = m_position2;
-                    m_orientation = m_quaternion2;
-                    m_fov = m_fov2;
-
-                    m_dtAnimate = 0.0f;
-                }
-                else
-                {
-                    float   interpolate = 0.5f - 0.5f * cos(pi * (tNext / m_dtAnimate));
-
-                    if (m_bAnimatePosition)
-                        m_position = (m_position1 * (1.0f - interpolate)) +
-                                     (m_position2 * interpolate);
-                    m_orientation = Slerp(m_quaternion1, m_quaternion2, interpolate);
-                    m_fov = (m_fov1 * (1.0f - interpolate)) +
-                            (m_fov2 * interpolate);
-
-                    m_tnowAnimate = tNext;
-
-                    animatingF = true;
-                }
-            }
-
-            m_pcamera->SetPosition(m_position);
-
-            //
-            // Jiggle the camera orientation based on the amount of afterburner and any residual effects
-            //
-
-            // Student TODO: reduce camera jiggle on afterburn (maybe make it adjustable? also potential accessibility issue)
-
-            const double jiggleHalfLife = 0.25f;
-            m_jiggle *= (float)pow(jiggleHalfLife, (double)dt);
-
-            float               fov = m_fov;
-            Orientation         orientation;
-            const Orientation*  porientation = &m_orientation;
-            if (bJiggle)
-            {
-                IafterburnerIGC*    afterburner = (IafterburnerIGC*)(trekClient.GetShip()->GetSourceShip()->GetMountedPart(ET_Afterburner, 0));
-                if (afterburner || m_jiggle > 1.0)
-                {
-                    float power = m_jiggle + (afterburner ? afterburner->GetPower() : 0);
-                    if (power != 0.0f)
-                    {
-                        float amount = RadiansFromDegrees(0.5) * power;
-
-                        orientation = m_orientation;
-
-                        orientation.Yaw(random(-amount, amount));
-                        orientation.Pitch(random(-amount, amount));
-
-                        porientation = &orientation;
-                    }
-                }
-
-                //Hack alert ... find the closest aleph and use it to provide an override for the fov
-                IshipIGC*   pshipSource = trekClient.GetShip()->GetSourceShip();
-
-                ImodelIGC*  pmodelAleph = FindTarget(pshipSource, c_ttWarp | c_ttNearest | c_ttAllSides);
-                if (pmodelAleph)
-                {
-                    float   range = (pmodelAleph->GetPosition() - pshipSource->GetPosition()).Length() -
-                                    trekClient.GetShip()->GetRadius();
-
-                    float   radius = pmodelAleph->GetRadius();
-
-                    if (range < radius)
-                    {
-                        fov = (range / radius) * s_fDefaultFOV;
-                        if (fov < 0.1f)
-                            fov = 0.1f;
-                        else if (fov > m_fov)
-                            fov = m_fov;
-                    }
-                }
-            }
-
-            Orientation viewOrientation = m_orientationHead * *porientation;
-
-            m_pcamera->SetOrientation(viewOrientation);
-            m_pcameraPosters->SetOrientation(viewOrientation);
-
-
-            if (bTarget)
-            {
-                ImodelIGC* pmodelTarget = GetCurrentTarget();
-
-                if (pmodelTarget != NULL)
-                {
-                    Orientation orientTarget = *porientation;
-
-                    Vector  dp = pmodelTarget->GetPosition() - m_position;
-
-                    static const Vector c_dpDefault(0.0f, 1.0f, 5.0f);
-                    orientTarget.TurnTo(dp.LengthSquared() < 1.0f ? c_dpDefault : dp);
-                    orientTarget.Invert();
-
-                    m_porientTransformTarget->SetValue(Matrix(orientTarget, Vector(0, 0, 0), 1));
-                    m_pwrapGeoTarget->SetGeo(m_pgeoTarget);
-                }
-                else
-                {
-                    m_pwrapGeoTarget->SetGeo(Geo::GetEmpty());
-                }
-            }
-
-            m_pcamera->SetFOV(fov);
-            m_pcameraPosters->SetFOV(fov);
-            //m_pcameraTurret->SetFOV(m_fov);
-
-            m_pcamera->Update();
-            m_pcameraPosters->Update();
-            //m_pcameraTurret->Update();
-
-            return animatingF;
-        }
-
-        void    SetAnimation(float t)
-        {
-            if (t > 0.0f)
-            {
-                //Start a new animation
-                m_position1 = m_position;
-                m_quaternion1 = m_orientation;
-                m_fov1 = m_fov;
-
-                if (m_dtAnimate == 0.0f)
-                {
-                    //We were not animating ... so set default destinations for the things that animate
-                    m_position2 = m_position1;
-                    m_quaternion2 = m_quaternion1;
-                    m_fov2 = m_fov1;
-                }
-
-                m_tnowAnimate = 0.0f;
-                m_dtAnimate = t;
-
-                m_bAnimatePosition = true;  //by default
-            }
-            else if ((t == 0.0f) && (m_dtAnimate != 0.0f))
-            {
-                //Turn animations off
-                m_dtAnimate = 0.0f;
-
-                m_position = m_position2;
-                m_quaternion = m_quaternion2;
-                m_fov = m_fov2;
-            }
-        }
-
-        float   GetAnimation(void) const
-        {
-            return m_dtAnimate;
-        }
-
-        void    SetJiggle(float jiggle)
-        {
-            ZAssert(jiggle >= 0.0f);
-            m_jiggle = jiggle;
-        }
-
-        void    SetToModel(ImodelIGC* pmodel)
-        {
-            assert (pmodel);
-            SetPosition(pmodel->GetPosition());
-            SetOrientation(pmodel->GetOrientation());
-        }
-
-        void    SetFOV(float   fov)
-        {
-            if (m_dtAnimate <= 0.0f)
-            {
-                //Snap to a position instantly
-                m_fov = fov;
+                m_porientTransformTarget->SetValue(Matrix(orientTarget, Vector(0, 0, 0), 1));
+                m_pwrapGeoTarget->SetGeo(m_pgeoTarget);
             }
             else
             {
-                //Modify the endpoint of an existing animation
-                m_fov2 = fov;
+                m_pwrapGeoTarget->SetGeo(Geo::GetEmpty());
             }
         }
 
-        void    SetPosition(const Vector&   position)
-        {
-            if ((m_dtAnimate <= 0.0f) || !m_bAnimatePosition)
-            {
-                //Snap to a position instantly
-                m_position = position;
-            }
-            else
-            {
-                //Modify the endpoint of an existing animation
-                m_position2 = position;
-            }
-        }
+        m_pcamera->SetFOV(GetViewFOV());
+        m_pcameraPosters->SetFOV(GetViewFOV());
+        m_pcamera->Update();
+        m_pcameraPosters->Update();
+        return animatingF;
+    }
+    void SetToModel(ImodelIGC *model)
+    {
+        assert(model);
+        SetPosition(model->GetPosition());
+        SetOrientation(model->GetOrientation());
+    }
+    const Vector &GetCameraPosition() const
+    {
+        return m_pcamera ? m_pcamera->GetPosition() : GetPosition();
+    }
+    const Orientation &GetCameraOrientation() const
+    {
+        return m_pcamera ? m_pcamera->GetOrientation() : GetOrientation();
+    }
 
-        void    SetOrientation(const Orientation&   orientation)
-        {
-            if (m_dtAnimate <= 0.0f)
-            {
-                m_orientation = orientation;
-            }
-            else
-            {
-                m_quaternion2 = orientation;
-            }
-        }
+  private:
+    TRef<Camera> m_pcamera, m_pcameraPosters;
 
-        float               GetFOV(void) const
-        {
-            return m_fov;
-        }
+  public:
+    // some members are public
 
-        const Vector&       GetPosition(void) const
-        {
-            return m_position;
-        }
+    //
+    // Target HUD
+    //
 
-        const Orientation&  GetOrientation(void) const
-        {
-            return m_orientation;
-        }
-
-        const Vector&       GetCameraPosition(void) const
-        {
-            if (m_pcamera)
-            {
-                return m_pcamera->GetPosition();
-            }
-            else
-            {
-                return m_position;
-            }
-        }
-
-        const Orientation&  GetCameraOrientation(void) const
-        {
-            if (m_pcamera)
-            {
-                return m_pcamera->GetOrientation();
-            }
-            else
-            {
-                return m_orientation;
-            }
-        }
-
-        void                SetAnimatePosition(bool bAnimatePosition)
-        {
-            m_bAnimatePosition = bAnimatePosition;
-        }
-
-    private:
-        TRef<Camera>          m_pcamera;
-        TRef<Camera>          m_pcameraPosters;
-        //TRef<Camera>          m_pcameraTurret;
-
-        Orientation     m_orientationHead;
-
-        Vector          m_position;
-        Orientation     m_orientation;
-        Quaternion      m_quaternion;
-        float           m_fov;
-
-        float           m_dtAnimate;
-        float           m_tnowAnimate;
-
-        float           m_jiggle;
-
-        Vector          m_position1;
-        Vector          m_position2;
-
-        Quaternion      m_quaternion1;
-        Quaternion      m_quaternion2;
-
-        float           m_fov1;
-        float           m_fov2;
-
-        float           m_oldHeadYaw;
-
-        bool            m_bAnimatePosition;
-
-    public:
-        // some members are public
-
-        //
-        // Target HUD
-        //
-
-        TRef<Camera>           m_pcameraTarget;
-        TRef<WrapGeo>          m_pwrapGeoTarget;
-        TRef<Geo>              m_pgeoTarget;
-        TRef<MatrixTransform>  m_porientTransformTarget;
+    TRef<Camera> m_pcameraTarget;
+    TRef<WrapGeo> m_pwrapGeoTarget;
+    TRef<Geo> m_pgeoTarget;
+    TRef<MatrixTransform> m_porientTransformTarget;
 };
 
 // this class wraps the logic for tracking the listener's head position based
@@ -1315,14 +1042,10 @@ public:
     // chase view stuff
     //
 
-    #define ARRAY_OF_SAMPLES_SIZE  4092 // BT - 8/17 - Was 128. Fixing sample under-run issues. Dx9 takes way more samples than Dx7 did, especially when zoomed out. 
-    struct  TurnRateSample
-    {
-        float   fTurnRate[3];
-        Time    time;
-    };
-    TurnRateSample      m_turnRateSamples[ARRAY_OF_SAMPLES_SIZE];
-    int                 m_turnRateSampleIndex;
+    Allegiance::ChaseMotion m_chaseMotion;
+    Time m_chaseSampleTime;
+    double m_chaseTime = 0;
+    bool m_chaseSampleValid = false;
 
     //
     // LOD
@@ -2940,9 +2663,6 @@ public:
         m_cameraControl.m_pgeoTarget     = Geo::GetEmpty();
         m_cameraControl.m_pwrapGeoTarget = new WrapGeo(m_cameraControl.m_pgeoTarget),
         m_cameraControl.m_porientTransformTarget = new MatrixTransform(Matrix::GetIdentity());
-
-        // initialize for chase view
-        m_turnRateSampleIndex = 0;
 
         pnsGamePanes->AddMember(
             "targetGeo",
@@ -6492,11 +6212,11 @@ public:
 
         // always use the upright coordinate system as a starting point here
         //m_cameraControl.SetOrientation (trekClient.GetShip()->GetSourceShip()->GetOrientation());
-        Orientation     orthogonal (Vector (1.0f, 0.0f, 0.0f), Vector (0.0f, 0.0f, 1.0f));
+        Orientation     orthogonal = Allegiance::OverrideCameraOrientation();
         m_cameraControl.SetOrientation (orthogonal);
 
         // this controls how long the launch animation lasts
-        m_timeOverrideStop = now + (bOverridePosition ? 5.0f : 3.0f);
+        m_timeOverrideStop = now + Allegiance::OverrideCameraDuration(bOverridePosition);
 
         m_bUseOverridePosition = bOverridePosition;
 
@@ -6849,141 +6569,18 @@ public:
                         const Vector&       position2,
                         float               length)
     {
-        assert ((position2 - position1).LengthSquared() > 0.0f);
-        Vector      axis = (position2 - position1).Normalize();
-        // GetOrthogonalVector does not return consistent results, which
-        // causes an unsightly jump when tracking the camera. I replaced it with
-        // some code that is biased toward the camera orientation when building a
-        // coordinate system. In an animation, this should choose an initial
-        // condition, then use that as a start point for the next frame. That
-        // should always give smooth results. BSW 2/2/2000
-        //Vector  side = axis.GetOrthogonalVector();
         Orientation orientation = m_cameraControl.GetOrientation();
-        Vector      up = orientation.GetUp ();
-        float       dot_product = up * axis;
-        if (fabsf (dot_product) > 0.95f)
-        {
-            up = orientation.GetRight ();
-            dot_product = up * axis;
-            if (fabsf (dot_product) > 0.95f)
-                up = orientation.GetRight ();
-            assert (up * axis < 0.95f);
-        }
-        Vector      side = CrossProduct (axis, up);
-
-        m_cameraControl.SetPosition(position1 - axis * (length * 2.0f) + side * (length * 0.25f));
-
-        orientation.TurnTo(axis);
+        Vector position;
+        Allegiance::TrackCamera(position1, position2, length, orientation, position);
+        m_cameraControl.SetPosition(position);
         m_cameraControl.SetOrientation(orientation);
     }
 
     void ComputeExternalChase (IshipIGC* pShip, Orientation& orientationBfr, Vector& positionBfr, float& offset)
     {
-        // get the ship orientation and position
-        const Orientation&  shipOrientation = pShip->GetOrientation ();
-        const Vector&       shipPosition = pShip->GetPosition();
-
-        // This part is for dealing with the zoomable camera
-        float   fZoomDelta = s_fExternalViewDistanceMax - s_fExternalViewDistanceMin;
-        offset = (offset - s_fExternalViewDistanceMin) / (fZoomDelta * 0.01);  // maps this into the range 0.0 ... 100.0
-        float   fDelayTime = 0.05f + (offset * 0.00333);
-
-        // find the sample index to interpolate
-        int     iSampleIndex = ((m_turnRateSampleIndex - 1) + ARRAY_OF_SAMPLES_SIZE) % ARRAY_OF_SAMPLES_SIZE;
-
-		// BT - 8/17 Fixing DX9 hang when in chase mode, and the camera is zoomed all the way out, this would cause a hang withe Dx9 engine. 
-		// The experiance is still bad (it's jumping all over the place), but at  least it doesn't hang. The Dx7 engine 
-		// works smoothly here, and the ship itself turns a lot nicer under DX7. 
-		// I believe that if you can figure out why this is different between the two engines, you will have solved the issue that was 
-		// introduced with the Dx9 conversion that is causing some players to report aiming issues. 
-		// The issue with the Dx9 version is that the m_turnRateSamples[iSampleIndex].time + fDelayTime) > m_turnRateSamples[m_turnRateSampleIndex].time is always true. 
-		// In the Dx7 engine version, this is NOT always true. 
-		// TODO: Resolve difference between Dx7 and Dx9 versions of the engines. 
-        while ((m_turnRateSamples[iSampleIndex].time + fDelayTime) > m_turnRateSamples[m_turnRateSampleIndex].time && iSampleIndex != 0)
-            iSampleIndex = ((iSampleIndex - 1) + ARRAY_OF_SAMPLES_SIZE) % ARRAY_OF_SAMPLES_SIZE;
-
-        // find the amount to interpolate
-        float   fDeltaTime = m_turnRateSamples[m_turnRateSampleIndex].time - (m_turnRateSamples[iSampleIndex].time + fDelayTime);
-        int     iNextSampleIndex = (iSampleIndex + 1) % ARRAY_OF_SAMPLES_SIZE;
-        float   fIntervalSize = m_turnRateSamples[iNextSampleIndex].time - m_turnRateSamples[iSampleIndex].time;
-        float   fInterpolant = 1.0f - (fDeltaTime / fIntervalSize);
-
-        // compute the angular displacements
-        float   fYawDisplacement = 0.0f;
-        float   fPitchDisplacement = 0.0f;
-        float   fRollDisplacement = 0.0f;
-
-        float   fPreviousYawRate = Interpolate (m_turnRateSamples[iNextSampleIndex].fTurnRate[c_axisYaw], m_turnRateSamples[iSampleIndex].fTurnRate[c_axisYaw], fInterpolant);
-        float   fPreviousPitchRate = Interpolate (m_turnRateSamples[iNextSampleIndex].fTurnRate[c_axisPitch], m_turnRateSamples[iSampleIndex].fTurnRate[c_axisPitch], fInterpolant);
-        float   fPreviousRollRate = Interpolate (m_turnRateSamples[iNextSampleIndex].fTurnRate[c_axisRoll], m_turnRateSamples[iSampleIndex].fTurnRate[c_axisRoll], fInterpolant);
-        float   fTimeInterval = fInterpolant * fIntervalSize * 0.5f;
-
-        while (iNextSampleIndex != m_turnRateSampleIndex)
-        {
-            fYawDisplacement += (fPreviousYawRate + m_turnRateSamples[iNextSampleIndex].fTurnRate[c_axisYaw]) * fTimeInterval;
-            fPreviousYawRate = m_turnRateSamples[iNextSampleIndex].fTurnRate[c_axisYaw];
-
-            fPitchDisplacement += (fPreviousPitchRate + m_turnRateSamples[iNextSampleIndex].fTurnRate[c_axisPitch]) * fTimeInterval;
-            fPreviousPitchRate = m_turnRateSamples[iNextSampleIndex].fTurnRate[c_axisPitch];
-
-            fRollDisplacement += (fPreviousRollRate + m_turnRateSamples[iNextSampleIndex].fTurnRate[c_axisRoll]) * fTimeInterval;
-            fPreviousRollRate = m_turnRateSamples[iNextSampleIndex].fTurnRate[c_axisRoll];
-
-            Time    oldTime = m_turnRateSamples[iNextSampleIndex].time;
-            iNextSampleIndex = (iNextSampleIndex + 1) % ARRAY_OF_SAMPLES_SIZE;
-            fTimeInterval = (m_turnRateSamples[iNextSampleIndex].time - oldTime) * 0.5f;
-        }
-        fYawDisplacement += (fPreviousYawRate + m_turnRateSamples[iNextSampleIndex].fTurnRate[c_axisYaw]) *  fTimeInterval;
-        fPitchDisplacement += (fPreviousPitchRate + m_turnRateSamples[iNextSampleIndex].fTurnRate[c_axisPitch]) *  fTimeInterval;
-        fRollDisplacement += (fPreviousRollRate + m_turnRateSamples[iNextSampleIndex].fTurnRate[c_axisRoll]) *  fTimeInterval;
-
-        // Compute orientation matrix from angular displacements
-        orientationBfr = shipOrientation;
-        orientationBfr.Roll (-fRollDisplacement);
-        orientationBfr.Pitch (fPitchDisplacement); // not negated, because it is already backwards for some reason
-        orientationBfr.Yaw (-fYawDisplacement);
-
-        // compute vector scaling quantities
-        float   fRadius = pShip->GetHullType()->GetLength();
-        float   fMaxVelocity = pShip->GetHullType()->GetMaxSpeed ();
-        Vector  velocityVector = pShip->GetVelocity ();
-        float   fVelocity = velocityVector.Length ();
-        float   fFractionMaxVelocity = fVelocity / fMaxVelocity;
-        if (fVelocity > 0.0f)
-        {
-            // this computes a proper multiplier for the scalar regardless of what
-            // direction the ship is travelling with respect to its orientation
-            velocityVector /= fVelocity;
-            float   fVelocityScalar = velocityVector * shipOrientation.GetForward ();
-            fVelocity *= (fVelocityScalar < 0.0f) ? (fVelocityScalar * 0.5f) : fVelocityScalar;
-        }
-        float   fFractionMaxForwardVelocity = fVelocity / fMaxVelocity;                     // range 0..1
-
-        // compute vector offset quantities
-        float   fCurrentVelocityOffset = fRadius * -0.5f * fFractionMaxVelocity;            // half the radius times the fraction of max velocity
-        float   fOldForwardVelocityOffset = fRadius * fFractionMaxForwardVelocity;          // range of the radius * (0 .. 1)
-        float   fOldUpOffset = fRadius * 0.3333f;                                           // one quarter of the radius
-        float   fCurrentOrientationOffset = offset * 0.5f;                                  // range 0 .. 50
-        float   fOldOrientationOffset = (offset + 100.0f) * 0.5f;                           // range 50 .. 100
-
-        // compute orientations taking into account the POV (the joystick hat control)
-        const Orientation&  headOrientation = m_cameraControl.GetHeadOrientation();
-        Orientation         currentLookOrientation = headOrientation * shipOrientation;
-        Orientation         oldLookOrientation = headOrientation * orientationBfr;
-
-        // We compute a new location for the camera by combining an offset
-        // along the old forward vector, an offset along the new forward
-        // vector, an offset along the actual velocity vector, and a bit
-        // of up offset so you can see what's on the other side of the ship.
-        positionBfr = shipPosition
-            + (orientationBfr.GetUp ()                  * fOldUpOffset)
-            + (orientationBfr.GetBackward ()            * fOldForwardVelocityOffset)
-            + (velocityVector                           * fCurrentVelocityOffset)
-            + (currentLookOrientation.GetBackward ()    * fCurrentOrientationOffset)
-            + (oldLookOrientation.GetBackward ()        * fOldOrientationOffset)
-            ;
-
-        // don't let the camera mode add an additional offset later
+        m_chaseMotion.Compute(pShip->GetOrientation(), pShip->GetPosition(), pShip->GetVelocity(),
+            pShip->GetHullType()->GetLength(), pShip->GetHullType()->GetMaxSpeed(),
+            m_cameraControl.GetHeadOrientation(), offset, orientationBfr, positionBfr);
         offset = 0.0f;
     }
 
@@ -7004,12 +6601,16 @@ public:
             float               myRadius = pshipSource->GetRadius();
             const Vector&       myPosition = pshipSource->GetPosition();
 
-            // fill in samples for chase view
-            m_turnRateSampleIndex = (m_turnRateSampleIndex + 1) % ARRAY_OF_SAMPLES_SIZE;
-            m_turnRateSamples[m_turnRateSampleIndex].fTurnRate[c_axisYaw] = pshipSource->GetCurrentTurnRate (c_axisYaw);
-            m_turnRateSamples[m_turnRateSampleIndex].fTurnRate[c_axisPitch] = pshipSource->GetCurrentTurnRate (c_axisPitch);
-            m_turnRateSamples[m_turnRateSampleIndex].fTurnRate[c_axisRoll] = pshipSource->GetCurrentTurnRate (c_axisRoll);
-            m_turnRateSamples[m_turnRateSampleIndex].time = trekClient.GetCore()->GetLastUpdate ();
+            Time sampleTime = trekClient.GetCore()->GetLastUpdate();
+            if (m_chaseSampleValid) {
+                float delta = sampleTime - m_chaseSampleTime;
+                if (delta < 0 || delta > 0.5f) m_chaseMotion.Reset();
+                m_chaseTime += delta;
+            }
+            m_chaseSampleValid = true;
+            m_chaseSampleTime = sampleTime;
+            m_chaseMotion.Record(m_chaseTime, Vector(pshipSource->GetCurrentTurnRate(c_axisYaw),
+                pshipSource->GetCurrentTurnRate(c_axisPitch), pshipSource->GetCurrentTurnRate(c_axisRoll)));
 
             if (InternalCamera(m_cm))
             {
@@ -7147,33 +6748,8 @@ public:
                                 pPosition = &positionBfr;
                                 pOrientation = &m_orientationExternalCamera;
 
-                                positionBfr = (0.5f * (targetPosition + myPosition));
-
-                                const Vector& backward = pOrientation->GetBackward();
-
-                                //Now how far back to we have to move the camera to get both in view
-                                float   dTarget;
-                                {
-                                    Vector  delta = targetPosition - positionBfr;
-
-                                    //Find the distance the target is along the forward vector
-                                    float   dBackward = delta * backward;
-
-                                    //Find the distance the target is perpendicular to the forward vector
-                                    float   dSide = (float)sqrt(delta.LengthSquared() + dBackward * dBackward);
-
-                                    dTarget = dSide * 3.0f + dBackward;  //5.0 == fudge factor based on field of view
-                                }
-
-                                float   dMe;
-                                {
-                                    Vector  delta = myPosition - positionBfr;
-                                    float   dBackward = delta * backward;
-                                    float   dSide = (float)sqrt(delta.LengthSquared() + dBackward * dBackward);
-                                    dMe = dSide * 3.0f + dBackward;
-                                }
-
-                                offset = (1.25f * ((dTarget > dMe) ? dTarget : dMe));
+                                Allegiance::FrameFlyBy(myPosition, targetPosition,
+                                    m_orientationExternalCamera, positionBfr, offset);
                             }
                             else
                             {
@@ -7186,9 +6762,7 @@ public:
 
                         case cmExternalOrbit:
                         {
-                            m_orientationExternalCamera.Pitch(dt * 0.35f);
-                            m_orientationExternalCamera.Yaw(dt * 0.2f);
-                            m_orientationExternalCamera.Roll(dt * 0.5f);
+                            Allegiance::OrbitCamera(m_orientationExternalCamera, dt);
 
                             pPosition = &myPosition;
                             pOrientation = &m_orientationExternalCamera;
@@ -7290,8 +6864,8 @@ public:
 
             bool    bAnimating = m_cameraControl.Apply(dt, bJiggle, m_pboolTargetHUD->GetValue());
 
-            m_pCommandVisibleGeo->SetVisible(m_bCommandGrid || CommandCamera(m_cm) ||
-                                             (bAnimating && CommandCamera(m_cmOld)));
+            m_pCommandVisibleGeo->SetVisible(Allegiance::CommandGridVisible(m_bCommandGrid, CommandCamera(m_cm),
+                                             bAnimating, CommandCamera(m_cmOld)));
 
             {
                 bool    v = !(InternalCamera(m_cm) &&
@@ -7425,20 +6999,7 @@ public:
     {
         assert (CommandCamera(m_cm));
 
-        Orientation o;
-        if (m_cm == cmExternalCommandView34)
-        {
-            static const Vector  forward(0.0f, sqrt2 / 2.0f, -sqrt2 / 2.0f);    //Remember negated in set
-            static const Vector  up(0.0f, sqrt2 / 2.0f, sqrt2 / 2.0f);
-            o.Set(forward, up);
-        }
-        else
-        {
-            assert (m_cm == cmExternalCommandViewTD);
-
-            o.Reset();
-        }
-        o.PostRoll(m_rollCommandCamera);
+        Orientation o = Allegiance::CommandViewOrientation(m_cm == cmExternalCommandViewTD, m_rollCommandCamera);
         m_cameraControl.SetOrientation(o);
     }
 
@@ -7469,20 +7030,12 @@ public:
 
             OrientCommandView();
 
-            m_displacementCommandView = Vector::GetZero();
-
-            if (pposition)
-            {
-                m_positionCommandView = *pposition;
-                m_distanceCommandCamera = s_fCommandViewDistanceMax / 2.0f;
-            }
-            else
-            {
-                float   fMin;
-                GetDefaultPosition(&m_positionCommandView, &fMin);
-                if (m_distanceCommandCamera < fMin)
-                    m_distanceCommandCamera = fMin;
-            }
+            Vector fallback = Vector::GetZero();
+            float fMin = 0.0f;
+            if (!pposition)
+                GetDefaultPosition(&fallback, &fMin);
+            Allegiance::PositionCommandView(pposition, fallback, fMin,
+                m_positionCommandView, m_displacementCommandView, m_distanceCommandCamera);
         }
     }
 
@@ -7534,9 +7087,7 @@ public:
 
             {
                 //No matter what ... never allow displacement over twice the normal max
-                float   l2 = m_positionCommandView.LengthSquared();
-                if (l2 > 4.0f * s_fCommandViewDisplacementMax * s_fCommandViewDisplacementMax)
-                    m_positionCommandView *= 2.0f * s_fCommandViewDisplacementMax / float(sqrt(l2));
+                Allegiance::ClampCommandView(m_positionCommandView);
             }
         }
 
@@ -7924,10 +7475,7 @@ public:
                             }
                             else
                             {
-                                double  sinAlpha = radius / (positionModel - positionCamera).Length();
-                                fScreenRadius = (sinAlpha < 1.0)
-                                                ? float(angleToPixels * asin(sinAlpha))      //hack ... 480/(50*pi/180) * 2asin(r/d)
-                                                : 640.0f;
+                                fScreenRadius = Allegiance::IndicatorAngularRadius(radius, (positionModel - positionCamera).Length(), angleToPixels);
                                 if (fScreenRadius < CmdViewMaxIconScreenSize)
                                 {
                                     if ((fScreenRadius < AnyViewMinRenderScreenSize) ||
@@ -8289,14 +7837,8 @@ public:
                             }
                             else
                             {
-                                const float c_fAutopilotDisengage = g_fJoystickDeadZone * 2.0f;
                                 bControlsInUse = bControlsInUse ||
-                                                 (js.controls.jsValues[c_axisYaw] - trekClient.trekJoyStick[c_axisYaw] < -c_fAutopilotDisengage) ||
-                                                 (js.controls.jsValues[c_axisYaw] - trekClient.trekJoyStick[c_axisYaw] >  c_fAutopilotDisengage) ||
-                                                 (js.controls.jsValues[c_axisPitch] - trekClient.trekJoyStick[c_axisPitch] < -c_fAutopilotDisengage) ||
-                                                 (js.controls.jsValues[c_axisPitch] - trekClient.trekJoyStick[c_axisPitch] >  c_fAutopilotDisengage) ||
-                                                 (js.controls.jsValues[c_axisRoll] - trekClient.trekJoyStick[c_axisRoll] < -c_fAutopilotDisengage) ||
-                                                 (js.controls.jsValues[c_axisRoll] - trekClient.trekJoyStick[c_axisRoll] >  c_fAutopilotDisengage);
+                                    Allegiance::AutopilotAxesChanged(js.controls, trekClient.trekJoyStick, g_fJoystickDeadZone);
                             }
 
                             if (bControlsInUse)
@@ -8354,28 +7896,14 @@ public:
                     else // autoPilot doesn't need these
                     {
                         // Pay attention to the joystick buttons.
-                        buttonsM |= (trekClient.m_selectedWeapon << selectedWeaponShiftIGC);
-                        if (js.button1 & buttonDown)
-                            buttonsM |= trekClient.fGroupFire
-                                        ? allWeaponsIGC
-                                        : oneWeaponIGC;
-
-                        if (js.button2 & buttonDown)
-                            buttonsM |= missileFireIGC;
-
-                        if (js.button3 & buttonDown)
-                            buttonsM |= afterburnerButtonIGC;
+                        buttonsM = Allegiance::ManualWeaponButtons(buttonsM, trekClient.m_selectedWeapon,
+                            trekClient.fGroupFire, (js.button1 & buttonDown) != 0,
+                            (js.button2 & buttonDown) != 0, (js.button3 & buttonDown) != 0);
                     }
 
-                    if (m_ptrekInput->IsTrekKeyDown(TK_DropMine, bAllowKeyboardMovement))
-                        buttonsM |= mineFireIGC;
-                    else
-                        buttonsM &= ~mineFireIGC;
-
-                    if (m_ptrekInput->IsTrekKeyDown(TK_DropChaff, bAllowKeyboardMovement))
-                        buttonsM |= chaffFireIGC;
-                    else
-                        buttonsM &= ~chaffFireIGC;
+                    buttonsM = Allegiance::ExpendableButtons(buttonsM,
+                        m_ptrekInput->IsTrekKeyDown(TK_DropMine, bAllowKeyboardMovement),
+                        m_ptrekInput->IsTrekKeyDown(TK_DropChaff, bAllowKeyboardMovement));
 
                     // training mission hook
                     Training::ApproveControls (js.controls);
@@ -8386,8 +7914,7 @@ public:
 					{
                         if (trekClient.GetShip()->GetTurretID() != NA)
                         {
-                            float   fov = (s_fMinFOV + 0.5f * (s_fMaxFOV - s_fMinFOV)) +
-                                          (0.5f * (s_fMaxFOV - s_fMinFOV)) * js.controls.jsValues[c_axisThrottle];
+                            float fov = Allegiance::TurretFieldOfView(js.controls.jsValues[c_axisThrottle]);
                             m_cameraControl.SetFOV(fov);
                         }
                         else
@@ -8395,17 +7922,13 @@ public:
                             float   fov = m_cameraControl.GetFOV();
                             if (m_ptrekInput->IsTrekKeyDown(TK_ZoomIn, true))
                             {
-                                fov -= dt;
-                                if (fov < s_fMinFOV)
-                                    fov = s_fMinFOV;
+                                fov = Allegiance::ZoomFieldOfView(fov, dt, false, s_fMinFOV, s_fMaxFOV);
 
                                 m_cameraControl.SetFOV(fov);
                             }
                             else if (m_ptrekInput->IsTrekKeyDown(TK_ZoomOut, true))
                             {
-                                fov += dt;
-                                if (fov > s_fMaxFOV)
-                                    fov = s_fMaxFOV;
+                                fov = Allegiance::ZoomFieldOfView(fov, dt, true, s_fMinFOV, s_fMaxFOV);
 
                                 m_cameraControl.SetFOV(fov);
                             }
@@ -8413,35 +7936,13 @@ public:
 							// BT 3/13/2016 - Wasp's slew rate fix. 
 							if (trekClient.GetShip()->GetBaseHullType() != NULL)
 							{
-								//What is the maximum desired rate of turn for this field of view?
-								//Use the same calculation as for turrets.
-								//Keep in sync with wintrek.cpp's FOV by throttle
-								static const float  c_minRate = RadiansFromDegrees(7.5f);
-								static const float  c_maxRate = RadiansFromDegrees(75.0f);
-								float   maxSlewRate = c_minRate +
-									(c_maxRate - c_minRate) * fov / s_fMaxFOV;
-
-								const IhullTypeIGC* pht = trekClient.GetShip()->GetHullType();
-								{
-									float               pitch = pht->GetMaxTurnRate(c_axisPitch);
-
-									if (pitch > maxSlewRate)
-										js.controls.jsValues[c_axisPitch] *= maxSlewRate / pitch;
-								}
-								{
-									float               yaw = pht->GetMaxTurnRate(c_axisYaw);
-
-									if (yaw > maxSlewRate)
-										js.controls.jsValues[c_axisYaw] *= maxSlewRate / yaw;
-								}
+                                Allegiance::LimitCockpitSlew(js.controls, trekClient.GetShip()->GetHullType(), fov, s_fMaxFOV);
 							}
                         }
                     }
 
 
-                    trekClient.GetShip()->SetControls(js.controls);
-                    trekClient.GetShip()->SetStateBits(buttonsMaskIGC | weaponsMaskIGC | selectedWeaponMaskIGC |
-                                                       missileFireIGC | mineFireIGC | chaffFireIGC, buttonsM);
+                    Allegiance::ApplyClientControls(trekClient.GetShip(), js.controls, buttonsM);
 
 					if ((m_cm == cmCockpit) || (m_cm == cmExternalChase)) { 
 						if (!m_ptrekInput->IsTrekKeyDown(TK_ViewRearLeft,bAllowKeyboardMovement) //TheRock 31-7-2009 Allow keyboard users to look around
@@ -8577,26 +8078,8 @@ public:
                     if (m_ptrekInput->IsTrekKeyDown(TK_ThrustDown, bAllowKeyboardMovement))
                         dUp += delta / 2;
 
-                    if (dRight)
-                    {
-                        Vector  v = m_cameraControl.GetOrientation().GetRight() * dRight;
-                        m_displacementCommandView += v;
-                        m_positionCommandView += v;
-                    }
-
-                    if (dUp)
-                    {
-                        Vector  up = m_cameraControl.GetOrientation().GetUp();
-                        up.z = 0.0f;
-
-                        float   l = (float)sqrt(up.x * up.x + up.y * up.y);
-                        assert (l != 0.0f);
-
-
-                        Vector  v = up * (dUp / l);
-                        m_displacementCommandView -= v;
-                        m_positionCommandView -= v;
-                    }
+                    Allegiance::PanCommandView(m_cameraControl.GetOrientation(), dRight, dUp,
+                                               m_displacementCommandView, m_positionCommandView);
                 }
                 else if (!bNoCameraControl)
                 {
@@ -8617,32 +8100,22 @@ public:
 
                     if (m_ptrekInput->IsTrekKeyDown(TK_ZoomOut, bAllowKeyboardMovement))
                     {
-                        m_distanceExternalCamera += dt * m_distanceExternalCamera;
-                        if (m_distanceExternalCamera > s_fExternalViewDistanceMax)
-                            m_distanceExternalCamera = s_fExternalViewDistanceMax;
+                        m_distanceExternalCamera = Allegiance::ZoomCameraDistance(m_distanceExternalCamera, dt, true, s_fExternalViewDistanceMin, s_fExternalViewDistanceMax);
                     }
                     else if (m_ptrekInput->IsTrekKeyDown(TK_ZoomIn, bAllowKeyboardMovement))
                     {
-                        m_distanceExternalCamera -= dt * m_distanceExternalCamera;
-
-                        if (m_distanceExternalCamera < s_fExternalViewDistanceMin)
-                            m_distanceExternalCamera = s_fExternalViewDistanceMin;
+                        m_distanceExternalCamera = Allegiance::ZoomCameraDistance(m_distanceExternalCamera, dt, false, s_fExternalViewDistanceMin, s_fExternalViewDistanceMax);
                     }
                 }
                 else if (m_cm == cmExternalChase)
                 {
                     if (m_ptrekInput->IsTrekKeyDown(TK_ZoomOut, bAllowKeyboardMovement))
                     {
-                        m_distanceExternalCamera += dt * m_distanceExternalCamera;
-                        if (m_distanceExternalCamera > s_fExternalViewDistanceMax)
-                            m_distanceExternalCamera = s_fExternalViewDistanceMax;
+                        m_distanceExternalCamera = Allegiance::ZoomCameraDistance(m_distanceExternalCamera, dt, true, s_fExternalViewDistanceMin, s_fExternalViewDistanceMax);
                     }
                     else if (m_ptrekInput->IsTrekKeyDown(TK_ZoomIn, bAllowKeyboardMovement))
                     {
-                        m_distanceExternalCamera -= dt * m_distanceExternalCamera;
-
-                        if (m_distanceExternalCamera < s_fExternalViewDistanceMin)
-                            m_distanceExternalCamera = s_fExternalViewDistanceMin;
+                        m_distanceExternalCamera = Allegiance::ZoomCameraDistance(m_distanceExternalCamera, dt, false, s_fExternalViewDistanceMin, s_fExternalViewDistanceMax);
                     }
                 }
             }
@@ -8827,10 +8300,7 @@ public:
             StartSound(newTargetSound);
         }
 
-        if (cid == c_cidDefault)
-            cid = pmodel ? trekClient.GetShip()->GetDefaultOrder(pmodel) : c_cidNone;
-
-        trekClient.GetShip()->SetCommand(c_cmdCurrent, pmodel, cid);
+        cid = Allegiance::SetCurrentTarget(trekClient.GetShip(), pmodel, cid);
 
         if (trekClient.m_fm.IsConnected())
         {
@@ -8954,107 +8424,17 @@ public:
         return bFlash;
     }
 
-    void    TrekFindTarget(int              ttMask,
-                           TrekKey          tk,
-                           TrekKey          tkNearest,
-                           TrekKey          tkPrevious,
-                           AbilityBitMask   abm = 0)
-    {
-        assert ((ttMask & c_ttFront) == 0);
-		if (tk == tkNearest)
-            ttMask |= c_ttNearest;
-		else if (tk == tkPrevious) 
-            ttMask |= c_ttPrevious;
 
-        const Vector*   pposition;
-        if (trekClient.GetViewCluster())
-        {
-            IstationIGC*    pstation = trekClient.GetShip()->GetStation();
-            if (pstation && (pstation->GetCluster() == trekClient.GetViewCluster()))
-                pposition = &(pstation->GetPosition());
-            else
-                pposition = &(Vector::GetZero());
-        }
-		else
-			pposition = &(trekClient.GetShip()->GetPosition());
-
-		ImodelIGC*  m = NULL; //Imago 7/31/09 ALLY 
-
-		if (trekClient.GetSide()->GetAllies() != NA) { 
-
-			//only target our sides bases unless in a pod
-			if (tkNearest == TK_TargetFriendlyBaseNearest) {
-
-				//determine if we're in a pod or not
-				bool bLifepod = false;
-				IhullTypeIGC*   pht = trekClient.GetShip()->GetSourceShip()->GetBaseHullType();
-				if (pht) {
-					HullAbilityBitMask  habm = pht->GetCapabilities();
-					if (habm & c_habmLifepod)
-						bLifepod = true;
-				}
-
-				if (!bLifepod)
-					m = FindTarget(trekClient.GetShip()->GetSourceShip(), ttMask, trekClient.GetShip()->GetCommandTarget(c_cmdCurrent),
-						trekClient.GetCluster(), pposition, NULL, abm, 0x7fffffff, 0); // false = don't search allied bases
-				else
-					m = FindTarget(trekClient.GetShip()->GetSourceShip(), ttMask, trekClient.GetShip()->GetCommandTarget(c_cmdCurrent),
-						trekClient.GetCluster(), pposition, NULL, abm); // true = (default) search allied bases/rescue probes
-
-			//targets allied bases only
-			} else if (tkNearest == TK_TargetAlliedBaseNearest) {
-				m = FindTarget(trekClient.GetShip()->GetSourceShip(), ttMask, trekClient.GetShip()->GetCommandTarget(c_cmdCurrent),
-					trekClient.GetCluster(), pposition, NULL, abm, 0x7fffffff, 2); // 2 = (hack) search allied bases/rescue probes only
-
-			} else {
-				//not after a friendly/allied base, do our regular thing (default)
-				m = FindTarget(trekClient.GetShip()->GetSourceShip(), ttMask, trekClient.GetShip()->GetCommandTarget(c_cmdCurrent),
-					trekClient.GetCluster(), pposition, NULL, abm);
-			}
-
-		} else { // team has no allies, do our regular thing
-
-			m = FindTarget(trekClient.GetShip()->GetSourceShip(),
-				ttMask,
-				trekClient.GetShip()->GetCommandTarget(c_cmdCurrent),
-				trekClient.GetCluster(),
-				pposition, NULL, abm);
-		}
-
-		SetTarget(m, c_cidDefault);
-    }
 
     void ToggleWeapon(Mount mount)
     {
-        IshipIGC* pship = trekClient.GetShip();
-
-        if (pship->GetParentShip() == NULL && (m_viewmode != vmHangar && m_viewmode != vmLoadout)) //#207 - Imago 8/10
+        if (m_viewmode != vmHangar && m_viewmode != vmLoadout)
         {
-            Mount nHardpoints = pship->GetHullType()->GetMaxFixedWeapons();
-            IweaponIGC* pweapon = (IweaponIGC*)pship->GetMountedPart(ET_Weapon, mount);
-
-            if (pweapon && mount < nHardpoints)
-            {
-                int stateM = trekClient.GetShip()->GetStateM();
-                Mount mountSelected = (stateM & selectedWeaponMaskIGC) >> selectedWeaponShiftIGC;
-
-                if (trekClient.fGroupFire
-                    || pweapon->GetMountID() != mountSelected)
-                {
-                    // set the client to single fire with this weapon
-                    trekClient.SetSelectedWeapon(mount);
-                    trekClient.fGroupFire = false;
-                    trekClient.PlaySoundEffect(ungroupWeaponsSound, trekClient.GetShip());
-                }
-                else
-                {
-                    // set the client back to group fire
-                    trekClient.fGroupFire = true;
-                    trekClient.PlaySoundEffect(groupWeaponsSound, trekClient.GetShip());
-                }
-            }
+            SoundID sound = Allegiance::ToggleWeaponSelection(trekClient.GetShip(), mount, trekClient.fGroupFire,
+                [&](Mount selected) { trekClient.SetSelectedWeapon(selected); });
+            if (sound != NA)trekClient.PlaySoundEffect(sound, trekClient.GetShip());
         }
-    }
+}
 
     int FindPartIndex(IpartIGC* ppart)
     {
@@ -9675,20 +9055,9 @@ public:
             {
                 if (trekClient.GetShip()->GetParentShip() == NULL)
                 {
-                    int stateM = trekClient.GetShip()->GetStateM();
-
-                    if ((stateM & (oneWeaponIGC | allWeaponsIGC)) == 0)
-                        trekClient.Reload(trekClient.GetShip(), NULL, ET_Weapon);
-
-                    if ((stateM & afterburnerButtonIGC) == 0)
-                        trekClient.Reload(trekClient.GetShip(), NULL, ET_Afterburner);
-
-                    if ((stateM & missileFireIGC) == 0)
-                        trekClient.Reload(trekClient.GetShip(), (IlauncherIGC*)(trekClient.GetShip()->GetMountedPart(ET_Magazine, 0)), ET_Magazine);
-                    if ((stateM & mineFireIGC) == 0)
-                        trekClient.Reload(trekClient.GetShip(), (IlauncherIGC*)(trekClient.GetShip()->GetMountedPart(ET_Dispenser, 0)), ET_Dispenser);
-                    if ((stateM & chaffFireIGC) == 0)
-                        trekClient.Reload(trekClient.GetShip(), (IlauncherIGC*)(trekClient.GetShip()->GetMountedPart(ET_ChaffLauncher, 0)), ET_ChaffLauncher);
+                    Allegiance::ManualReload(trekClient.GetShip(), [](IlauncherIGC* launcher, EquipmentType type) {
+                        trekClient.Reload(trekClient.GetShip(), launcher, type);
+                    });
 
                     trekClient.PlayNotificationSound(salReloadingSound, trekClient.GetShip());
                 }
@@ -9958,14 +9327,14 @@ public:
 				DWORD value = 0;
                 if (m_cm == cmCockpit && GetViewMode() == vmCombat)
                 {
-                    value = m_radarCockpit = (m_radarCockpit + 1) % (int(RadarImage::c_rlMax) + 1);
+                    value = m_radarCockpit = Allegiance::CycleRadarDetail(m_radarCockpit);
                     m_pradarImage->SetRadarLOD((RadarImage::RadarLOD)m_radarCockpit);
 
                     trekClient.PostText(false, "%s", c_szRadarLODs[m_radarCockpit]);
                 }
                 else if (GetViewMode() == vmCommand)
                 {
-                    value = m_radarCommand = (m_radarCommand + 1) % (int(RadarImage::c_rlMax) + 1);
+                    value = m_radarCommand = Allegiance::CycleRadarDetail(m_radarCommand);
                     m_pradarImage->SetRadarLOD((RadarImage::RadarLOD)m_radarCommand);
 
                     trekClient.PostText(false, "%s", c_szRadarLODs[m_radarCommand]);
@@ -10098,263 +9467,71 @@ public:
             }
             break;
 
-            case TK_TargetHostile:  // target the thing that has done the most damage to me recently
-            {
-                DamageTrack*    pdt = trekClient.GetShip()->GetDamageTrack();
-                assert (pdt);
-                int n = pdt->GetDamageBuckets()->n();
-                if (n > 0)
-                {
-                    DamageBucketLink* pdbl = pdt->GetDamageBuckets()->first();
-                    assert (pdbl);
-
-                    ImodelIGC*   pmodel = pdbl->data()->model();
-                    if ((n > 1) && (trekClient.GetShip()->GetCommandTarget(c_cmdCurrent) == pmodel))
-                    {
-                        assert (pdbl->next());
-                        pmodel = pdbl->next()->data()->model();
-                    }
-
-                    SetTarget(pmodel, c_cidDefault);
-                }
-                else
-                {
-                    TrekFindTarget((c_ttShip | c_ttEnemy | c_ttNearest), tk, TK_TargetEnemyNearest, TK_TargetEnemyPrev, c_habmRescue | c_habmMiner | c_habmBuilder);
-                }
-            }
-            break;
-
-            case TK_TargetCenter:   // target the ship closest to the reticle
-            {
-                if (trekClient.flyingF())
-                {
-                    const Orientation*  porientation = &(trekClient.GetShip()->GetOrientation());
-                    IshipIGC*           pship = trekClient.GetShip()->GetParentShip();
-
-                    if (pship)
-                    {
-                        Mount   turretID = trekClient.GetShip()->GetTurretID();
-                        if (turretID == NA)
-                            porientation = &(pship->GetOrientation());
-                    }
-                    else
-                        pship = trekClient.GetShip();
-
-                    ImodelIGC*  m = FindTarget(pship,
-                                               (c_ttFront | c_ttAllTypes | c_ttAllSides),
-                                               trekClient.GetShip()->GetCommandTarget(c_cmdCurrent),
-                                               NULL, NULL,
-                                               porientation);
-
-                    SetTarget(m, c_cidDefault);
-                }
-            }
-            break;
-
+            case TK_TargetHostile:
+            case TK_TargetCenter:
             case TK_TargetEnemy:
             case TK_TargetEnemyNearest:
             case TK_TargetEnemyPrev:
-            {
-                TrekFindTarget((c_ttShip | c_ttEnemy), tk, TK_TargetEnemyNearest, TK_TargetEnemyPrev, c_habmRescue | c_habmMiner | c_habmBuilder);
-            }
-            break;
-
             case TK_TargetEnemyBomber:
             case TK_TargetEnemyBomberNearest:
             case TK_TargetEnemyBomberPrev:
-            {
-                TrekFindTarget((c_ttShip | c_ttEnemy), tk, TK_TargetEnemyBomberNearest, TK_TargetEnemyBomberPrev, c_habmThreatToStation);
-            }
-            break;
-
             case TK_TargetEnemyFighter:
             case TK_TargetEnemyFighterNearest:
             case TK_TargetEnemyFighterPrev:
-            {
-                TrekFindTarget((c_ttShip | c_ttEnemy), tk, TK_TargetEnemyFighterNearest, TK_TargetEnemyFighterPrev, c_habmFighter);
-            }
-            break;
-
             case TK_TargetEnemyMiner:
             case TK_TargetEnemyMinerNearest:
             case TK_TargetEnemyMinerPrev:
-            {
-                TrekFindTarget((c_ttShip | c_ttEnemy), tk, TK_TargetEnemyMinerNearest, TK_TargetEnemyMinerPrev, c_habmMiner);
-            }
-            break;
-
             case TK_TargetEnemyConstructor:
             case TK_TargetEnemyConstructorNearest:
             case TK_TargetEnemyConstructorPrev:
-            {
-                TrekFindTarget((c_ttShip | c_ttEnemy), tk, TK_TargetEnemyConstructorNearest, TK_TargetEnemyConstructorPrev, c_habmBuilder);
-            }
-            break;
-
             case TK_TargetEnemyBase:
             case TK_TargetEnemyBaseNearest:
             case TK_TargetEnemyBasePrev:
-            {
-                TrekFindTarget((c_ttStation | c_ttEnemy | c_ttAnyCluster), tk, TK_TargetEnemyBaseNearest, TK_TargetEnemyBasePrev, ~c_sabmPedestal);
-            }
-            break;
-
             case TK_TargetEnemyMajorBase:
             case TK_TargetEnemyMajorBaseNearest:
             case TK_TargetEnemyMajorBasePrev:
-            {
-                TrekFindTarget((c_ttStation | c_ttEnemy | c_ttAnyCluster), tk, TK_TargetEnemyMajorBaseNearest, TK_TargetEnemyMajorBasePrev, c_sabmFlag);
-            }
-            break;
-
             case TK_TargetFriendlyBase:
             case TK_TargetFriendlyBaseNearest:
             case TK_TargetFriendlyBasePrev:
-            {
-                int             ttMask = (c_ttStation | c_ttFriendly | c_ttAnyCluster);
-                AbilityBitMask  abm = c_sabmLand;
-
-                {
-                    IhullTypeIGC*   pht = trekClient.GetShip()->GetSourceShip()->GetBaseHullType();
-                    if (pht)
-                    {
-                        HullAbilityBitMask  habm = pht->GetCapabilities();
-
-                        if (habm & c_habmLifepod)
-                        {
-                            abm = c_sabmRescue | c_sabmRescueAny | c_sabmLand;
-                            ttMask |= c_ttProbe;
-                        }
-                        else if ((habm & c_habmFighter) == 0)
-                            abm = c_sabmCapLand;
-                    }
-                }
-
-                TrekFindTarget(ttMask, tk, TK_TargetFriendlyBaseNearest, TK_TargetFriendlyBasePrev,
-                               abm);
-            }
-            break;
-
             case TK_TargetAlliedBase:
             case TK_TargetAlliedBaseNearest:
             case TK_TargetAlliedBasePrev:
-            {
-                int             ttMask = (c_ttStation | c_ttFriendly | c_ttAnyCluster);
-                AbilityBitMask  abm = c_sabmLand;
-
-                {
-                    IhullTypeIGC*   pht = trekClient.GetShip()->GetSourceShip()->GetBaseHullType();
-                    if (pht)
-                    {
-                        HullAbilityBitMask  habm = pht->GetCapabilities();
-
-                        if (habm & c_habmLifepod)
-                        {
-                            abm = c_sabmRescue | c_sabmRescueAny | c_sabmLand;
-                            ttMask |= c_ttProbe;
-                        }
-                        else if ((habm & c_habmFighter) == 0)
-                            abm = c_sabmCapLand;
-                    }
-                }
-
-                TrekFindTarget(ttMask, tk, TK_TargetAlliedBaseNearest, TK_TargetAlliedBasePrev,
-                               abm);
-            }
-            break;
-
             case TK_TargetFriendlyMajorBase:
             case TK_TargetFriendlyMajorBaseNearest:
             case TK_TargetFriendlyMajorBasePrev:
-            {
-                TrekFindTarget((c_ttStation | c_ttFriendly | c_ttAnyCluster), tk, TK_TargetFriendlyMajorBaseNearest, TK_TargetFriendlyMajorBasePrev, c_sabmFlag);
-            }
-            break;
-
             case TK_Target:
             case TK_TargetNearest:
             case TK_TargetPrev:
-            {
-                ImodelIGC*  pmodel = trekClient.GetShip()->GetCommandTarget(c_cmdCurrent);
-
-                TrekFindTarget(pmodel && (pmodel != trekClient.GetShip())
-                               ? GetSimilarTargetMask(pmodel)
-                               : (c_ttShipTypes | c_ttEnemy),
-                               tk, TK_TargetNearest, TK_TargetPrev);
-            }
-            break;
-
             case TK_TargetFriendly:
             case TK_TargetFriendlyNearest:
             case TK_TargetFriendlyPrev:
-            {
-                TrekFindTarget((c_ttShip | c_ttFriendly), tk, TK_TargetFriendlyNearest, TK_TargetFriendlyPrev);
-            }
-            break;
-
             case TK_TargetFriendlyBomber:
             case TK_TargetFriendlyBomberNearest:
             case TK_TargetFriendlyBomberPrev:
-            {
-                TrekFindTarget((c_ttShip | c_ttFriendly), tk, TK_TargetFriendlyBomberNearest, TK_TargetFriendlyBomberPrev, c_habmThreatToStation);
-            }
-            break;
-
             case TK_TargetFriendlyFighter:
             case TK_TargetFriendlyFighterNearest:
             case TK_TargetFriendlyFighterPrev:
-            {
-                TrekFindTarget((c_ttShip | c_ttFriendly), tk, TK_TargetFriendlyFighterNearest, TK_TargetFriendlyFighterPrev, c_habmFighter);
-            }
-            break;
-
             case TK_TargetFriendlyMiner:
             case TK_TargetFriendlyMinerNearest:
             case TK_TargetFriendlyMinerPrev:
-            {
-                TrekFindTarget((c_ttShip | c_ttFriendly), tk, TK_TargetFriendlyMinerNearest, TK_TargetFriendlyMinerPrev, c_habmMiner);
-            }
-            break;
-
             case TK_TargetFriendlyConstructor:
             case TK_TargetFriendlyConstructorNearest:
             case TK_TargetFriendlyConstructorPrev:
-            {
-                TrekFindTarget((c_ttShip | c_ttFriendly), tk, TK_TargetFriendlyConstructorNearest, TK_TargetFriendlyConstructorPrev, c_habmBuilder);
-            }
-            break;
-
             case TK_TargetFriendlyLifepod:
             case TK_TargetFriendlyLifepodNearest:
             case TK_TargetFriendlyLifepodPrev:
-            {
-                TrekFindTarget((c_ttShip | c_ttFriendly), tk, TK_TargetFriendlyLifepodNearest, TK_TargetFriendlyLifepodPrev, c_habmLifepod);
-            }
-            break;
-
             case TK_TargetArtifact:
             case TK_TargetArtifactNearest:
             case TK_TargetArtifactPrev:
-            {
-                TrekFindTarget((c_ttTreasure | c_ttNeutral), tk, TK_TargetArtifactNearest, TK_TargetArtifactPrev, 1);
-            }
-            break;
-
             case TK_TargetFlag:
             case TK_TargetFlagNearest:
             case TK_TargetFlagPrev:
-            {
-                TrekFindTarget((c_ttTreasure | c_ttEnemy), tk, TK_TargetFlagNearest, TK_TargetFlagPrev, 1);
-            }
-            break;
-
             case TK_TargetWarp:
             case TK_TargetWarpNearest:
             case TK_TargetWarpPrev:
-            {
-                TrekFindTarget((c_ttWarp | c_ttNeutral), tk, TK_TargetWarpNearest, TK_TargetWarpPrev);
-            }
-            break;
+                Allegiance::SelectTargetForKey(trekClient.GetShip(), trekClient.GetViewCluster(), tk,
+                    [&](ImodelIGC* target, CommandID command) { SetTarget(target, command); });
+                break;
 
             case TK_ToggleAutoPilot:
             {
@@ -10484,26 +9661,18 @@ public:
                         }
                     } else if (m_cm == cmExternalChase || !NoCameraControl(m_cm)) {
                         if (tk == TK_ZoomIn) {
-                            m_distanceExternalCamera -= dt * m_distanceExternalCamera;
-                            if (m_distanceExternalCamera < s_fExternalViewDistanceMin)
-                                m_distanceExternalCamera = s_fExternalViewDistanceMin;
+                            m_distanceExternalCamera = Allegiance::ZoomCameraDistance(m_distanceExternalCamera, dt, false, s_fExternalViewDistanceMin, s_fExternalViewDistanceMax);
                         } else {
-                            m_distanceExternalCamera += dt * m_distanceExternalCamera;
-                            if (m_distanceExternalCamera > s_fExternalViewDistanceMax)
-                                m_distanceExternalCamera = s_fExternalViewDistanceMax;
+                            m_distanceExternalCamera = Allegiance::ZoomCameraDistance(m_distanceExternalCamera, dt, true, s_fExternalViewDistanceMin, s_fExternalViewDistanceMax);
                         }
                     } 
 					else if (m_cm == cmCockpit) {
                         float   fov = m_cameraControl.GetFOV();
                         if (tk == TK_ZoomIn) {
-                            fov -= dt;
-                            if (fov < s_fMinFOV)
-                                fov = s_fMinFOV;
+                            fov = Allegiance::ZoomFieldOfView(fov, dt, false, s_fMinFOV, s_fMaxFOV);
                             m_cameraControl.SetFOV(fov);
                         } else {
-                            fov += dt;
-                            if (fov > s_fMaxFOV)
-                                fov = s_fMaxFOV;
+                            fov = Allegiance::ZoomFieldOfView(fov, dt, true, s_fMinFOV, s_fMaxFOV);
                             m_cameraControl.SetFOV(fov);
                         }
                     }
@@ -10582,43 +9751,16 @@ public:
 
     void    RejectQueuedCommand(bool    bClear = true, bool bNegative = false)
     {
-        if (trekClient.GetLastMoneyRequest() != 0)
-        {
-            trekClient.SetLastMoneyRequest(0);
-
-            IshipIGC*   pshipSender = trekClient.GetLastSender();
-            if (pshipSender)
-            {
-                if (bNegative)
-                {
-                    if (pshipSender != trekClient.GetShip())
-                    {
-                        trekClient.SendChat(trekClient.GetShip(), CHAT_INDIVIDUAL, pshipSender->GetObjectID(),
-                                            voNegativeSound, "Negative.");
-                    }
-                }
-                trekClient.SetLastSender(NULL);
-            }
-        }
-        else if (trekClient.GetShip()->GetCommandID(c_cmdQueued) != c_cidNone)
-        {
-            if (bClear)
-                trekClient.GetShip()->SetCommand(c_cmdQueued, NULL, c_cidNone);
-
-            IshipIGC*   pshipSender = trekClient.GetLastSender();
-            if (pshipSender)
-            {
-                if (bNegative)
-                {
-                    if (pshipSender != trekClient.GetShip())
-                    {
-                        trekClient.SendChat(trekClient.GetShip(), CHAT_INDIVIDUAL, pshipSender->GetObjectID(),
-                                            voNegativeSound, "Negative.");
-                    }
-                }
-                trekClient.SetLastSender(NULL);
-            }
-        }
+        Allegiance::RejectQueuedRequest(trekClient.GetLastMoneyRequest(), trekClient.GetShip()->GetCommandID(c_cmdQueued),
+            bClear, bNegative, trekClient.GetShip(),
+            [&] { trekClient.SetLastMoneyRequest(0); },
+            [&] { trekClient.GetShip()->SetCommand(c_cmdQueued, NULL, c_cidNone); },
+            [&] { return trekClient.GetLastSender(); },
+            [&] { trekClient.SetLastSender(NULL); },
+            [&](IshipIGC* sender) {
+                trekClient.SendChat(trekClient.GetShip(), CHAT_INDIVIDUAL, sender->GetObjectID(),
+                                    voNegativeSound, "Negative.");
+            });
 
         m_timeRejectQueuedCommand = trekClient.m_now + (3600.0f * 24.0f * 20.0f);   //20 days in the future
     }
@@ -10633,9 +9775,7 @@ public:
         {
             if (pshipSender && (pshipSender != trekClient.GetShip()))
             {
-                Money   m = trekClient.GetMoney();
-                if (request > m)
-                    request = m;
+                request = Allegiance::ApprovedMoneyRequest(request, trekClient.GetMoney());
 
                 if (request > 0)
                 {
@@ -10649,53 +9789,21 @@ public:
         }
         else
         {
-            CommandID   cid = trekClient.GetShip()->GetCommandID(c_cmdQueued);
-            if (cid != c_cidNone)
-            {
-                ImodelIGC*  pmodel = trekClient.GetShip()->GetCommandTarget(c_cmdQueued);
-                if (pmodel && trekClient.GetShip()->LegalCommand(cid, pmodel))
-                {
-                    trekClient.PlaySoundEffect(acceptCommandSound);
-                    if (cid == c_cidJoin)
-                    {
-                        if (pmodel->GetObjectType() == OT_ship)
-                            trekClient.SetWing(((IshipIGC*)pmodel)->GetWingID());
-                    }
-                    else
-                    {
-                        if ((cid == c_cidPickup) &&
-                            (pmodel->GetObjectType() == OT_ship) &&
-                            trekClient.GetShip()->GetBaseHullType()->HasCapability(c_habmRescue))
-                        {
-                            //Tell the other person to pick me up as well
-                            trekClient.SendChat(trekClient.GetShip(),
-                                                CHAT_INDIVIDUAL,
-                                                pmodel->GetObjectID(),
-                                                NA,
-                                                NULL,
-                                                c_cidPickup,
-                                                OT_ship,
-                                                trekClient.GetShipID(),
-                                                trekClient.GetShip());
-                        }
-
-                        SetTarget(pmodel, cid);
-                        SetAccepted(pmodel, cid);
-
-                        if (bExecute &&
-                            (trekClient.GetShip()->GetStation() == NULL) &&
-                            (trekClient.GetShip()->GetParentShip() == NULL) &&
-                            trekClient.GetCluster(trekClient.GetShip(), pmodel))
-                        {
-                            trekClient.SetAutoPilot(true);
-                            trekClient.bInitTrekJoyStick = true;
-                            trekClient.PlaySoundEffect(salAutopilotEngageSound);
-                        }
-                    }
-
-                    trekClient.GetShip()->SetCommand(c_cmdQueued, NULL, c_cidNone);
-                }
-            }
+            Allegiance::AcceptQueuedOrder(trekClient.GetShip(), bExecute,
+                [&] { trekClient.PlaySoundEffect(acceptCommandSound); },
+                [&](IshipIGC* target) { trekClient.SetWing(target->GetWingID()); },
+                [&](IshipIGC* target) {
+                    trekClient.SendChat(trekClient.GetShip(), CHAT_INDIVIDUAL, target->GetObjectID(),
+                        NA, NULL, c_cidPickup, OT_ship, trekClient.GetShipID(), trekClient.GetShip());
+                },
+                [&](ImodelIGC* target, CommandID command) { SetTarget(target, command); },
+                [&](ImodelIGC* target, CommandID command) { SetAccepted(target, command); },
+                [&](ImodelIGC* target) { return trekClient.GetCluster(trekClient.GetShip(), target) != NULL; },
+                [&] {
+                    trekClient.SetAutoPilot(true);
+                    trekClient.bInitTrekJoyStick = true;
+                    trekClient.PlaySoundEffect(salAutopilotEngageSound);
+                });
         }
 
 
@@ -10782,17 +9890,7 @@ public:
 
     float MapJoystick(float value)
     {
-        if (value > g_fJoystickDeadZone)
-            value = (value - g_fJoystickDeadZone) / g_fInverseJoystickDeadZone;
-        else if (value < -g_fJoystickDeadZone)
-            value = (value + g_fJoystickDeadZone) / g_fInverseJoystickDeadZone;
-        else
-            value = 0.0f;
-
-        if (!m_bLinearControls)
-            value *= fabsf (value);
-
-        return value;
+        return Allegiance::MapJoystick(value, g_fJoystickDeadZone, g_fInverseJoystickDeadZone, m_bLinearControls);
     }
 
     void SwitchToJoyThrottle(void)
@@ -10803,15 +9901,7 @@ public:
         }
         else
         {
-            // if the ship is currently thrusting in the same direction as the ship orientation (not actively slowing down)
-            if (trekClient.GetShip()->GetEngineVector() * trekClient.GetShip()->GetOrientation().GetForward() > 0)
-            {
-                trekClient.trekThrottle = 1.0f;
-            }
-            else
-            {
-                trekClient.trekThrottle = -1.0f;
-            }
+            trekClient.trekThrottle = Allegiance::AutopilotReleaseThrottle(trekClient.GetShip());
         }
     }
 
@@ -10882,81 +9972,31 @@ public:
 
         if (bInternalCamera)
         {
-            // roll left/right
-
-            if (m_ptrekInput->IsTrekKeyDown(TK_RollRight, bReadKeyboard)) {
-                js->controls.jsValues[c_axisRoll] = -1.0f;
-            } else if (m_ptrekInput->IsTrekKeyDown(TK_RollLeft, bReadKeyboard)) {
-                js->controls.jsValues[c_axisRoll] = 1.0f;
-            }
-
-            // yaw left/right
-
-            if (m_ptrekInput->IsTrekKeyDown(TK_RollModifier, bReadKeyboard)) {
-                if (m_ptrekInput->IsTrekKeyDown(TK_YawRight, bReadKeyboard)) {
-                    js->controls.jsValues[c_axisRoll] = -1.0f;
-                } else if (m_ptrekInput->IsTrekKeyDown(TK_YawLeft, bReadKeyboard)) {
-                    js->controls.jsValues[c_axisRoll] = 1.0f;
-                }
-            } else {
-                if (m_ptrekInput->IsTrekKeyDown(TK_YawRight, bReadKeyboard)) {
-                    js->controls.jsValues[c_axisYaw] = -1.0f;
-                } else if (m_ptrekInput->IsTrekKeyDown(TK_YawLeft, bReadKeyboard)) {
-                    js->controls.jsValues[c_axisYaw] = 1.0f;
-                }
-            }
-
-            // up/down == pitch
-
-            if (m_ptrekInput->IsTrekKeyDown(TK_PitchDown, bReadKeyboard)) {
-                js->controls.jsValues[c_axisPitch] = -1.0f;
-            } else if (m_ptrekInput->IsTrekKeyDown(TK_PitchUp, bReadKeyboard)) {
-                js->controls.jsValues[c_axisPitch] = 1.0f;
-            }
-
-            if (bHandleThrottle && m_ptrekInput->IsTrekKeyDown(TK_ThrottleUp, bReadKeyboard)) //Spunky #76
-            {
-                trekClient.trekThrottle =
-                      (trekClient.trekThrottle < 0.8f)
-                    ? (trekClient.trekThrottle + 0.2f)
-                    : 1.0f;
-                trekClient.joyThrottle = false;
-                bThrottleChange = true;
-				bHandleThrottle=false;
-            }
-            else if (bHandleThrottle && m_ptrekInput->IsTrekKeyDown(TK_ThrottleDown, bReadKeyboard)) //Spunky #76
-            {
-                trekClient.trekThrottle =
-                      (trekClient.trekThrottle > -0.8f)
-                    ? (trekClient.trekThrottle - 0.2f)
-                    : -1.0f;
-                trekClient.joyThrottle = false;
-                bThrottleChange = true;
-				bHandleThrottle=false;
-            }
+            Allegiance::KeyboardSteering(js->controls.jsValues[c_axisYaw], js->controls.jsValues[c_axisPitch],
+                js->controls.jsValues[c_axisRoll], [&](TrekKey key) { return m_ptrekInput->IsTrekKeyDown(key, bReadKeyboard); });
         }
 
         if (m_ptrekInput->IsTrekKeyDown(TK_ThrottleZero, bReadKeyboard))
         {
-            trekClient.trekThrottle = -1.0f;
+            trekClient.trekThrottle = Allegiance::ThrottlePreset(0);
             trekClient.joyThrottle = false;
             bThrottleChange = true;
         }
         else if (m_ptrekInput->IsTrekKeyDown(TK_Throttle33, bReadKeyboard))
         {
-            trekClient.trekThrottle = -0.3f;
+            trekClient.trekThrottle = Allegiance::ThrottlePreset(1);
             trekClient.joyThrottle = false;
             bThrottleChange = true;
         }
         else if (m_ptrekInput->IsTrekKeyDown(TK_Throttle66, bReadKeyboard))
         {
-            trekClient.trekThrottle = 0.3f;
+            trekClient.trekThrottle = Allegiance::ThrottlePreset(2);
             trekClient.joyThrottle = false;
             bThrottleChange = true;
         }
         else if (m_ptrekInput->IsTrekKeyDown(TK_ThrottleFull, bReadKeyboard))
         {
-            trekClient.trekThrottle = 1.0f;
+            trekClient.trekThrottle = Allegiance::ThrottlePreset(3);
             trekClient.joyThrottle = false;
             bThrottleChange = true;
         }
@@ -11151,64 +10191,8 @@ public:
             {
                 m_nLastCountdown = nTimeLeft;
 
-                switch (m_nLastCountdown)
-                {
-                case 10 * 60:
-                    trekClient.PlaySoundEffect(countdown10minSound);
-                    break;
-
-                case 5 * 60:
-                    trekClient.PlaySoundEffect(countdown5minSound);
-                    break;
-
-                case 1 * 60:
-                    trekClient.PlaySoundEffect(countdown1minSound);
-                    break;
-
-                case 30:
-                    trekClient.PlaySoundEffect(countdown30Sound);
-                    break;
-
-                case 10:
-                    trekClient.PlaySoundEffect(countdown10Sound);
-                    break;
-
-                case 9:
-                    trekClient.PlaySoundEffect(countdown9Sound);
-                    break;
-
-                case 8:
-                    trekClient.PlaySoundEffect(countdown8Sound);
-                    break;
-
-                case 7:
-                    trekClient.PlaySoundEffect(countdown7Sound);
-                    break;
-
-                case 6:
-                    trekClient.PlaySoundEffect(countdown6Sound);
-                    break;
-
-                case 5:
-                    trekClient.PlaySoundEffect(countdown5Sound);
-                    break;
-
-                case 4:
-                    trekClient.PlaySoundEffect(countdown4Sound);
-                    break;
-
-                case 3:
-                    trekClient.PlaySoundEffect(countdown3Sound);
-                    break;
-
-                case 2:
-                    trekClient.PlaySoundEffect(countdown2Sound);
-                    break;
-
-                case 1:
-                    trekClient.PlaySoundEffect(countdown1Sound);
-                    break;
-                }
+                SoundID sound = Allegiance::CountdownSound(m_nLastCountdown);
+                if (sound != NA) trekClient.PlaySoundEffect(sound);
             }
         }
     }
@@ -11357,4 +10341,3 @@ void WinTrekClient::ForwardLeaderBoardMessage(FEDMESSAGE * pLeaderBoardMessage)
 {
     ::ForwardLeaderBoardMessage(pLeaderBoardMessage);
 }
-

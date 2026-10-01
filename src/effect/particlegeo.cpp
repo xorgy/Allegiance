@@ -1,5 +1,6 @@
 #include "particlegeo.h"
 #include "thinggeo.h"
+#include "../ClientCore/ParticleEffects.h"
 
 #include <image.h>
 
@@ -39,26 +40,12 @@ class SmokeBehavior : public ParticleBehavior
             // get the surface we will render from
             TRef<Surface> pSmokeSurface = m_pImageSmoke->GetSurface();
 
-            // compute the remaining duration of the effect
-            float   fCountdownToFinish = (pParticleData->m_fDuration - fElapsedTime) / pParticleData->m_fDuration;
-
-            // the effect is grey, but is linearly fading to 0.0 in all components,
-            // but green is scaled back a tad to reduce a greenish hue appearing
-            Color   color;
-            float   fColorComponent = 0.25f * fCountdownToFinish;
-            color.SetRGBA (fColorComponent, fColorComponent * 0.8f, fColorComponent, fColorComponent);
-
-            // the effect is growing linearly
-            float   fStartSize = 0.75f;
-            float   fFinalSize = 3.0f;
-            float   fDeltaSize = fFinalSize - fStartSize;
-            float   fSize = pParticleData->m_fSize * (fStartSize + (fDeltaSize * (1.0f - fCountdownToFinish)));
-
-            // compute the new location of the effect
-            Vector  vecEffectPosition = pParticleData->m_vecPosition + (pParticleData->m_vecVelocity * fElapsedTime) + (pParticleData->m_vecAcceleration * (fElapsedTime * fElapsedTime * 0.5f));
-
-            // draw the decal
-            pContext->DrawDecal (pSmokeSurface, color, vecEffectPosition, Vector::GetZero(), Vector::GetZero(), fSize, pParticleData->m_fAngle);
+            const auto appearance = Allegiance::SmokeAppearance(pParticleData->m_fSize, fElapsedTime, pParticleData->m_fDuration);
+            Color color(appearance.red, appearance.green, appearance.blue, appearance.alpha);
+            Vector position = Allegiance::ParticlePosition(pParticleData->m_vecPosition,
+                pParticleData->m_vecVelocity, pParticleData->m_vecAcceleration, fElapsedTime);
+            pContext->DrawDecal(pSmokeSurface, color, position, Vector::GetZero(), Vector::GetZero(),
+                appearance.size, pParticleData->m_fAngle + appearance.angle);
         }
 
         //////////////////////////////////////////////////////////////////////
@@ -83,46 +70,12 @@ class FireBehavior : public ParticleBehavior
             // get the surface we will render from
             TRef<Surface> pFireSurface = m_pImageFire->GetSurface();
 
-            // set parameters and compute the durations of the two phases of the effect
-            float   fRampUpFraction = 0.1f;
-            float   fRampUpDuration = pParticleData->m_fDuration * fRampUpFraction;
-            float   fRampDownDuration = pParticleData->m_fDuration - fRampUpDuration;
-
-            // compute the remaining duration of the effect, and clamp it at 1.0 if
-            // the effect is still ramping up
-            float   fCountdownToFinish = (pParticleData->m_fDuration - fElapsedTime) / fRampDownDuration;
-            if (fCountdownToFinish > 1.0f)
-                fCountdownToFinish = 1.0f;
-
-            // if the effect hasn't finished
-            Color   color;
-            float   fSize;
-
-            // Several parts of this effect countdown from 0.5 to 0.0, rather than from
-            // 1.0 to 0.0, so we precompute that value for efficiency
-            float   fScaledCountdownToFinish = 0.5f * fCountdownToFinish;
-
-            // check to see which phase the effect is in
-            if (fElapsedTime < fRampUpDuration)
-            {
-                // The effect is ramping up, so the puff is white, and it grows from half size
-                // to full size during the ramp up period using an exponential growth
-                color.SetRGBA (1.0f, fCountdownToFinish, fCountdownToFinish, fScaledCountdownToFinish * fCountdownToFinish);
-                fSize = pParticleData->m_fSize * (0.5f + (0.5f * powf (fElapsedTime / fRampUpDuration, 0.666f)));
-            }
-            else
-            {
-                // the effect is ramping down, during which it changes from yellow to red, and 
-                // shrinks to half size using an exponential decay
-                color.SetRGBA (1.0f, fCountdownToFinish, fCountdownToFinish * 0.25f, fScaledCountdownToFinish * fCountdownToFinish);
-                fSize = pParticleData->m_fSize * (0.5f + (0.5f * powf (fCountdownToFinish, 0.666f)));
-            }
-
-            // compute the new location of the effect
-            Vector  vecEffectPosition = pParticleData->m_vecPosition + (pParticleData->m_vecVelocity * fElapsedTime) + (pParticleData->m_vecAcceleration * (fElapsedTime * fElapsedTime * 0.5f));
-
-            // draw the decal
-            pContext->DrawDecal (pFireSurface, color, vecEffectPosition, Vector::GetZero(), Vector::GetZero(), fSize, pParticleData->m_fAngle);
+            const auto appearance = Allegiance::FireAppearance(pParticleData->m_fSize, fElapsedTime, pParticleData->m_fDuration);
+            Color color(appearance.red, appearance.green, appearance.blue, appearance.alpha);
+            Vector position = Allegiance::ParticlePosition(pParticleData->m_vecPosition,
+                pParticleData->m_vecVelocity, pParticleData->m_vecAcceleration, fElapsedTime);
+            pContext->DrawDecal(pFireSurface, color, position, Vector::GetZero(), Vector::GetZero(),
+                appearance.size, pParticleData->m_fAngle + appearance.angle);
         }
 
         //////////////////////////////////////////////////////////////////////
@@ -169,37 +122,12 @@ class AfterburnerBehavior : public ParticleBehavior
             // get the surface we will render from
             TRef<Surface> pSmokeSurface = m_pImageSmoke->GetSurface();
 
-            // set parameters and compute the durations of the two phases of the effect
-            float   fRampUpFraction = 0.1f;
-            float   fRampUpDuration = pParticleData->m_fDuration * fRampUpFraction;
-            float   fRampDownDuration = pParticleData->m_fDuration - fRampUpDuration;
-
-            // compute the remaining duration of the effect, and clamp it at 1.0 if
-            // the effect is still ramping up
-            float   fCountdownToFinish = (pParticleData->m_fDuration - fElapsedTime) / fRampDownDuration;
-            if (fCountdownToFinish > 1.0f)
-                fCountdownToFinish = 1.0f;
-
-            // the effect starts yellow and turns grey, but is linearly fading to 0.0 in all components,
-            Color   color;
-            float   fColorComponent = 0.25f * fCountdownToFinish;
-            if (fElapsedTime < fRampUpDuration)
-                color.SetRGBA (fColorComponent * 4.0f, fColorComponent * 3.0f, fColorComponent, fColorComponent);
-            else
-                // green is scaled back a tad to reduce a greenish hue appearing
-                color.SetRGBA (fColorComponent, fColorComponent * 0.8f, fColorComponent, fColorComponent);
-
-            // the effect is growing linearly
-            float   fStartSize = 1.0f;
-            float   fFinalSize = 2.0f;
-            float   fDeltaSize = fFinalSize - fStartSize;
-            float   fSize = pParticleData->m_fSize * (fStartSize + (fDeltaSize * (1.0f - fCountdownToFinish)));
-
-            // compute the new location of the effect
-            Vector  vecEffectPosition = pParticleData->m_vecPosition + (pParticleData->m_vecVelocity * fElapsedTime) + (pParticleData->m_vecAcceleration * (fElapsedTime * fElapsedTime * 0.5f));
-
-            // draw the decal
-            pContext->DrawDecal (pSmokeSurface, color, vecEffectPosition, Vector::GetZero(), Vector::GetZero(), fSize, pParticleData->m_fAngle);
+            const auto appearance = Allegiance::BoosterAppearance(pParticleData->m_fSize, fElapsedTime, pParticleData->m_fDuration);
+            Color color(appearance.red, appearance.green, appearance.blue, appearance.alpha);
+            Vector position = Allegiance::ParticlePosition(pParticleData->m_vecPosition,
+                pParticleData->m_vecVelocity, pParticleData->m_vecAcceleration, fElapsedTime);
+            pContext->DrawDecal(pSmokeSurface, color, position, Vector::GetZero(), Vector::GetZero(),
+                appearance.size, pParticleData->m_fAngle + appearance.angle);
         }
 
         //////////////////////////////////////////////////////////////////////
@@ -224,26 +152,12 @@ class SparkBehavior : public ParticleBehavior
             // get the surface we will render from
             TRef<Surface> pSparkSurface = m_pImageSpark->GetSurface();
 
-            // draw multiple copies of the effect to produce a blur effect
-            for (int i = 0; i < 1; i++)
-            {
-                // compute the remaining duration of the effect
-                float   fCountdownToFinish = (pParticleData->m_fDuration - fElapsedTime) / pParticleData->m_fDuration;
-
-                // the effect is hot blue, fading out
-                Color   color;
-                float   fColorComponent = 0.5f * fCountdownToFinish * fCountdownToFinish;
-                color.SetRGBA (fColorComponent * 1.5f, fColorComponent * 2.0f, fCountdownToFinish, fColorComponent);
-
-                // compute the new location of the effect
-                Vector  vecEffectPosition = pParticleData->m_vecPosition + (pParticleData->m_vecVelocity * fElapsedTime) + (pParticleData->m_vecAcceleration * (fElapsedTime * fElapsedTime * 0.5f));
-
-                // draw the decal
-                pContext->DrawDecal (pSparkSurface, color, vecEffectPosition, Vector::GetZero(), Vector::GetZero(), pParticleData->m_fSize, pParticleData->m_fAngle + (fCountdownToFinish * pi));
-
-                // scale the elapsed time to produce a blur effect
-                fElapsedTime *= 0.97f;
-            }
+            const auto appearance = Allegiance::SparkAppearance(pParticleData->m_fSize, fElapsedTime, pParticleData->m_fDuration);
+            Color color(appearance.red, appearance.green, appearance.blue, appearance.alpha);
+            Vector position = Allegiance::ParticlePosition(pParticleData->m_vecPosition,
+                pParticleData->m_vecVelocity, pParticleData->m_vecAcceleration, fElapsedTime);
+            pContext->DrawDecal(pSparkSurface, color, position, Vector::GetZero(), Vector::GetZero(),
+                appearance.size, pParticleData->m_fAngle + appearance.angle);
         }
 
         //////////////////////////////////////////////////////////////////////
@@ -303,6 +217,7 @@ class ParticleGeoImpl : public ParticleGeo
     public:
         //////////////////////////////////////////////////////////////////////
         ParticleGeoImpl(Modeler* pModeler, Number* pTime) : ParticleGeo (pTime),
+            m_iIndexCurrentParticle(0),
             m_iIndexCurrentParticle (0),
             m_smokeBehavior (pModeler),
             m_fireBehavior (pModeler),

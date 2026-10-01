@@ -35,6 +35,14 @@ class       CsideIGC : public IsideIGC
 
     public:
 
+#ifdef ALLEGIANCE_NATIVE
+        void NativeRestoreScores(const DataSideIGC& data) {
+            m_data.nKills=data.nKills;m_data.nDeaths=data.nDeaths;m_data.nEjections=data.nEjections;
+            m_data.nBaseKills=data.nBaseKills;m_data.nBaseCaptures=data.nBaseCaptures;
+            m_data.nFlags=data.nFlags;m_data.nArtifacts=data.nArtifacts;
+            m_data.conquest=data.conquest;m_data.territory=data.territory;m_data.fTimeEndured=data.fTimeEndured;
+        }
+#endif
     // IbaseIGC
         virtual HRESULT                 Initialize(ImissionIGC* pMission, Time now, const void* data, int dataSize);
         virtual void                    Terminate(void);

@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=FreeAllegiance Native
+Comment=Space combat and local training
+Exec=allegiance-native
+Terminal=false
+Categories=Game;Simulation;
+StartupWMClass=org.freeallegiance.Native

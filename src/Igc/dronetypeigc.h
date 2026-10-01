@@ -23,6 +23,9 @@
 class       CdroneTypeIGC : public IdroneTypeIGC
 {
     public:
+#ifdef ALLEGIANCE_NATIVE
+        void NativeSetStaticOwner(ImissionIGC* owner) override { m_pMission = owner; }
+#endif
         CdroneTypeIGC(void)
         {
         }

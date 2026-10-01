@@ -13,7 +13,7 @@
 #include    "pch.h"
 #include    "SuspendedPlaySoundAction.h"
 #include    "SuspendedSoundFinishedCondition.h"
-#include    "TrainingMission.h"
+#include    "trainingmission.h"
 
 namespace Training
 {

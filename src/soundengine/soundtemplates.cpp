@@ -14,11 +14,29 @@
 
 #include "soundbase.h"
 #include "soundutil.h"
+#ifdef ALLEGIANCE_NATIVE
+#include <filesystem>
+#else
 #include "regkey.h"
+#endif
+#include <map>
 
 namespace SoundEngine {
 
     bool bConvertToMono = false;
+#ifdef ALLEGIANCE_NATIVE
+    // Sound variations must not consume the simulation's global RNG. Preserve
+    // Windows' 15-bit draw range (Linux RAND_MAX + 1 also overflows signed int).
+    static int TemplateRandom() {
+        static uint32_t state=0x718a4f29u;
+        state^=state<<13;state^=state>>17;state^=state<<5;
+        return int(state&32767u);
+    }
+    constexpr int soundRandomMax=32767;
+#else
+    static int TemplateRandom() { return rand(); }
+    constexpr int soundRandomMax=RAND_MAX;
+#endif
 
 // a template for wave files
 class WaveFileTemplate : public ISoundTemplate
@@ -33,6 +51,9 @@ public:
         m_strFilename = strFilename;
 
         // check to make sure the file exists.
+#ifdef ALLEGIANCE_NATIVE
+        return std::filesystem::is_regular_file(static_cast<const char*>(strFilename)) ? S_OK : STG_E_FILENOTFOUND;
+#else
         HANDLE hFile;
 
         hFile = CreateFile(strFilename, 0, FILE_SHARE_READ, nullptr,
@@ -45,6 +66,7 @@ public:
             CloseHandle(hFile);
             return S_OK;
         }
+#endif
     };
 
     // tries to initialize the object with the given data object.
@@ -98,6 +120,14 @@ HRESULT CreateWaveFileSoundTemplate(TRef<ISoundTemplate>& pstDest, const ZString
 
     return hr;
 };
+
+HRESULT CreateWaveFileSoundTemplate(TRef<ISoundTemplate>& destination, ISoundPCMData* data)
+{
+    TRef<WaveFileTemplate> sound = new WaveFileTemplate();
+    HRESULT hr = sound->Init(data);
+    if (SUCCEEDED(hr)) destination = sound;
+    return hr;
+}
 
 // creates a dummy sound template 
 // (NOTE: Not optimized - fix or use only for error handling!)
@@ -1202,7 +1232,7 @@ public:
                     (short*)(m_pvData) + (m_dwSize - m_dwRepeatLength)/2;
 
                 short* pwAdd;
-                for (pwAdd = pwSample2Start; pwAdd < pwSample2Start; ++pwAdd)
+                for (pwAdd = pwSample2Start; pwAdd < pwSample3Start; ++pwAdd)
                 {
                     // add them with saturation
                     *pwAdd = (short)(std::max(-0x8000, std::min(0x7FFF,
@@ -1416,7 +1446,7 @@ public:
 
         do 
         {
-            float fChoice = (rand()+1) * m_fTotalWeight / (RAND_MAX + 1);
+            float fChoice = (TemplateRandom()+1) * m_fTotalWeight / (soundRandomMax + 1);
             pstNew = (TRef<ISoundTemplate>&)(*(--(m_templates.lower_bound(fChoice)))).second;
         } 
         while (m_templates.size() > 2 && pstNew == m_pstLast);
@@ -1503,7 +1533,7 @@ public:
 					// KGJV: typecasted pow args to keep compiler happy
                     float fProbability = 1 - (float)pow((float)2, -((float)dwElapsedTime/m_fPeriodMS));
 
-                    if (rand() < fProbability * RAND_MAX)
+                    if (TemplateRandom() < fProbability * soundRandomMax)
                     {
                         // start a new sound
                         TRef<ISoundInstance> pNewSound;
@@ -1741,6 +1771,9 @@ public:
     // Starts the sound.
     virtual HRESULT Start()
     {
+        // A queued instance can be stopped before its turn arrives.
+        if (!m_pstSource)
+            return E_FAIL;
         HRESULT hr = m_pstSource->CreateSound(m_pBase, m_pbufferSource, m_psource);
 
         if (SUCCEEDED(hr))
@@ -1764,11 +1797,15 @@ public:
         // if the sound has not been started yet, force a start so that we
         // will get the finish event.
         if (m_pBase)
-            return m_pBase->Stop();
-        else if (m_peventsource)
+            return m_pBase->Stop(bForceNow);
+        else
         {
-            m_peventsource->Trigger();
+            TRef<ISoundInstance> keepAlive = this;
             m_pstSource = nullptr;
+            m_pbufferSource = nullptr;
+            m_psource = nullptr;
+            if (m_peventsource)
+                m_peventsource->Trigger();
         }
 
         return S_OK;
@@ -1905,7 +1942,10 @@ private:
         while (iterTemplate != m_templatesPending.end())
         {
             if ((*iterTemplate).second.timeExpiration - now < 0.0f)
+            {
+                (*iterTemplate).second.pinstance->Stop(true);
                 iterTemplate = m_templatesPending.erase(iterTemplate);
+            }
             else
             {
                 float fUrgency = now - (*iterTemplate).second.timeUrgency;
@@ -2010,7 +2050,10 @@ public:
         if (m_peventSoundFinished)
             m_peventSoundFinished->RemoveSink(this);
         m_peventSoundFinished = nullptr;
-        m_templatesPending.clear();
+        TemplateMap pending;
+        pending.swap(m_templatesPending);
+        for (auto& entry : pending)
+            entry.second.pinstance->Stop(true);
 
         return S_OK;
     }

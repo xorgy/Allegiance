@@ -22,6 +22,11 @@
 class CchaffIGC : public TmodelIGC<IchaffIGC>
 {
     public:
+#ifdef ALLEGIANCE_NATIVE
+        ExpendableTypeID NativeTypeID() const { return m_pChaffTypeData->expendabletypeID; }
+        Time NativeExpireTime() const { return m_timeExpire; }
+        void NativeSetExpireTime(Time time) { m_timeExpire=time; }
+#endif
         CchaffIGC(void);
         ~CchaffIGC(void);
 

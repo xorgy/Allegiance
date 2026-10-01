@@ -20,6 +20,10 @@
 #include <vector.h>
 #include <zmath.h>
 #include <ztime.h>
+#ifdef ALLEGIANCE_NATIVE
+#include <vector>
+#include <memory>
+#endif
 
 /*
 ** Disable some stupid warning messages that we really don't need and
@@ -620,6 +624,10 @@ class   Endpoint
 {
     public:
         float       value;
+#ifdef ALLEGIANCE_NATIVE
+        // Occupies the pointer-alignment padding on native 64-bit builds.
+        uint32_t    nativeIndex;
+#endif
         HitTest*    pHitTest;
         bool        highF;
 
@@ -810,8 +818,11 @@ class   HitTest : public Transform44
             //No addref on m_data ... this hit test is part of m_data
         }
 
-        ~HitTest(void)
+        virtual ~HitTest(void)
         {
+#ifdef ALLEGIANCE_NATIVE
+            if(m_noHit)m_noHit->Release();
+#endif
             assert (m_data);
             m_data->Release();
         }
@@ -1033,6 +1044,12 @@ class   HitTest : public Transform44
 
         void            SetNoHit(HitTest*   ht)
         {
+#ifdef ALLEGIANCE_NATIVE
+            // Projectiles can outlive the firing ship's collision hull. A
+            // recycled address must never make an unrelated hull immune.
+            if(ht)ht->AddRef();
+            if(m_noHit)m_noHit->Release();
+#endif
             m_noHit = ht;
         }
 
@@ -1143,6 +1160,9 @@ class   HitTest : public Transform44
               
     friend class KDnode;
     friend class KDroot;
+#ifdef ALLEGIANCE_NATIVE
+    friend class NativeScaleCollisionReference;
+#endif
 };
 typedef Slist_utl<HitTest*>  HitTestList;
 typedef Slink_utl<HitTest*>  HitTestLink;
@@ -1167,12 +1187,39 @@ class   KDnode
         KDnode*     m_parent;
         KDnode*     m_children[2];
 
-        void        allocHitTestsEndpoints(int   n);
+        void        allocHitTestsEndpoints(int   n
+#ifdef ALLEGIANCE_NATIVE
+                                          ,bool endpoints=true
+#endif
+                                          );
 
         int         m_nHitTests;
         int         m_maxHitTests;
         HitTest**   m_ppHitTests;
         Endpoint**  m_ppEndpoints[c_nAxes];
+#ifdef ALLEGIANCE_NATIVE
+        struct NativeBox {BoundingBox bounds;};
+        bool m_nativeHasTargets{};
+        NativeBox* m_nativeBoxes{};
+        HitTest*const* m_nativeHits{};
+        HitTest* nativeHit(int index)const{return m_nativeHits[m_nativeOrder[index]];}
+        uint8_t* m_nativeFlags{}; // bit 0: current partition, bit 1: eligible target
+        // Root-local HitTest indices, followed by three sorted endpoint token
+        // arrays. A token's low bit is highF; its other bits index NativeBox.
+        std::unique_ptr<uint32_t[]> m_nativeOrder;
+        bool m_nativeEndpointStorage{};
+        uint32_t* nativeEndpoints(int axis) {return m_nativeOrder.get()+m_maxHitTests*(1+2*axis);}
+        const uint32_t* nativeEndpoints(int axis) const {return m_nativeOrder.get()+m_maxHitTests*(1+2*axis);}
+
+        // SSE2 stores XY as {-max, min}; Z and the scalar fallback are canonical.
+        BoundingBox m_nativeBounds;
+        void refreshNativeBounds(bool sortedEndpoints=false);
+#ifdef __SSE2__
+        void testNative(HitTest*,CollisionQueue*,const BoundingBox&)const;
+#endif
+        friend class NativeScaleCollisionReference;
+        friend class KDroot;
+#endif
 };
 
 class   KDroot : public KDnode
@@ -1186,11 +1233,35 @@ class   KDroot : public KDnode
 
         void    flush(void);
         void    update(void);
+#ifdef ALLEGIANCE_NATIVE
+        void test(HitTest*,CollisionQueue*)const;
+        struct NativeCast {HitTest* hit;BoundingBox bounds;HitTestID id;HitTest* noHit;};
+        struct NativeCandidates {
+            struct Entry {int leaf,next;};
+            std::vector<int> heads,tails;std::vector<Entry> entries;
+            void clear(){heads.clear();tails.clear();entries.clear();}
+        };
+        static NativeCast nativeCast(HitTest*);
+        void nativeBatch(const std::vector<NativeCast>&,NativeCandidates&)const;
+        void applyNativeBatch(const NativeCast&,const NativeCandidates&,int,CollisionQueue*)const;
+#endif
 
     private:
         int     m_nAdded;
         int     m_nDeleted;
         bool    m_bStatic;
+#ifdef ALLEGIANCE_NATIVE
+        struct NativeNode {BoundingBox bounds;int first,count,high,axis;float pivot;};
+        struct NativeLeaf {BoundingBox bounds;HitTest* hit;HitTestID id;};
+        std::vector<NativeNode> m_nativeNodes;
+        std::vector<NativeLeaf> m_nativeLeaves;
+        mutable std::vector<int> m_nativeBatchWorkspace;
+        void gatherNativeBatch(int,size_t,int,const std::vector<NativeCast>&,NativeCandidates&,size_t&)const;
+        std::vector<NativeBox> m_nativeBoxStorage;
+        std::vector<uint8_t> m_nativeFlagStorage;
+        int appendNativeTree(const KDnode&,const BoundingBox&);
+        void testNativeTree(int,HitTest*,CollisionQueue*,const BoundingBox&)const;
+#endif
 };
 
 class   CollisionEntry
@@ -1405,6 +1476,7 @@ static char * Strcat(char * szDst, const char * szSrc)
 #include "listwrappers.h"
 
 // Class for temporary dll function use
+#ifdef _WIN32
 template <class Func> // signature of function to get, so that Proc can be used without casting
 class CTempFuncDll
 {
@@ -1430,6 +1502,8 @@ private:
   Func pfunc;
 };
 
+
+#endif
 
 class CTempTimer_OptimizedOut // timers do nothing in optimized builds
 {

@@ -75,6 +75,13 @@ HRESULT CbuoyIGC::Initialize(ImissionIGC* pMission, Time now, const void* data, 
 
 void    CbuoyIGC::Terminate(void)
 {
+#ifdef ALLEGIANCE_NATIVE
+    // Explicit removal clears ship consumers through TerminateModelEvent.
+    // Their final release must not recursively terminate this same buoy.
+    if (m_terminating || !GetMyMission())
+        return;
+    m_terminating = true;
+#endif
     AddRef();
 
     GetMyMission()->DeleteBuoy(this);
@@ -92,6 +99,12 @@ int     CbuoyIGC::Export(void*    data) const
         dataBuoy->position = GetPosition();
         dataBuoy->clusterID = GetCluster()->GetObjectID();
         dataBuoy->type = m_type;
+#ifdef ALLEGIANCE_NATIVE
+        // Native snapshots reconstruct individual live buoys, rather than
+        // treating this export as a map-file template with a generated ID.
+        dataBuoy->buoyID = m_buoyID;
+        dataBuoy->visible = m_visible;
+#endif
     }
 
     return sizeof(DataBuoyIGC);

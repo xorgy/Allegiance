@@ -183,6 +183,9 @@ class   CmodelIGC
 				debugf("mmf Igc modelIGC.h SetVelocity: newVal^2 debug build would have called assert and exited, commented out for now\n");
 			}
             // assert (newVal * newVal >= 0.0f);
+#ifdef ALLEGIANCE_NATIVE
+            if(m_cluster && !(m_attributes&c_mtNotPickable) && m_model->GetObjectType()!=OT_buoy)m_cluster->InvalidateDodgeIndex();
+#endif
             m_pHitTest->SetVelocity(newVal);
         }
 
@@ -198,8 +201,18 @@ class   CmodelIGC
         }
         void                SetRotation(const Rotation& newVal)
         {
+#ifdef ALLEGIANCE_NATIVE
+            m_nativeSpinValid = false;
+#endif
             m_rotation = newVal;
         }
+#ifdef ALLEGIANCE_NATIVE
+        struct NativeSpin {Vector forward, up; Time time;};
+        const NativeSpin& NativeSpinAnchor() {
+            if(!m_nativeSpinValid){m_nativeSpin={GetOrientation().GetForward(),GetOrientation().GetUp(),m_lastUpdate};m_nativeSpinValid=true;}
+            return m_nativeSpin;
+        }
+#endif
         float               GetRadius(void) const
         {
             return m_pHitTest->GetRadius();
@@ -207,6 +220,9 @@ class   CmodelIGC
         void                SetRadius(float newVal)
         {
             assert (newVal != 0.0f);
+#ifdef ALLEGIANCE_NATIVE
+            if(m_cluster && !(m_attributes&c_mtNotPickable) && m_model->GetObjectType()!=OT_buoy)m_cluster->InvalidateDodgeIndex();
+#endif
             m_pHitTest->SetRadius(newVal);
             m_pThingSite->SetRadius(newVal);
         }
@@ -222,6 +238,9 @@ class   CmodelIGC
         }
         void                SetSide(IsideIGC* newVal)
         {
+#ifdef ALLEGIANCE_NATIVE
+            if(m_side!=newVal && m_cluster)m_cluster->InvalidateDodgeIndex();
+#endif
             IsideIGC*   psideOld = m_side;
 
             if (m_side)
@@ -362,6 +381,10 @@ class   CmodelIGC
 
         ImodelIGC*          m_model;        //pointer for anything that needs a pointer to the "model" & not the class implementation
         Rotation            m_rotation;
+#ifdef ALLEGIANCE_NATIVE
+        NativeSpin          m_nativeSpin;
+        bool                m_nativeSpinValid{false};
+#endif
         IclusterIGC*        m_cluster;
         float               m_mass;
         float               m_signature;
@@ -552,6 +575,9 @@ template<class T> class TmodelIGC : public T
         {
             m_model.SetRotation(newVal);
         }
+#ifdef ALLEGIANCE_NATIVE
+        const CmodelIGC::NativeSpin& NativeModelSpinAnchor() {return m_model.NativeSpinAnchor();}
+#endif
         virtual float                GetRadius(void) const
         {
             return m_model.GetRadius();

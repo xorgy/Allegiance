@@ -27,6 +27,9 @@ const float   c_dtTimeBetweenComplaints = 30.0f;
 CshipIGC::CshipIGC(void)
 :
     m_fuel(0.0f),
+#ifdef ALLEGIANCE_NATIVE
+    m_shipID(NA),
+#endif
     m_stateM(0),
     m_station(NULL),
     m_pmissileLast(NULL),
@@ -78,6 +81,9 @@ CshipIGC::CshipIGC(void)
 
 void    CshipIGC::ReInitialize(DataShipIGC * dataShip, Time now)
 {
+#ifdef ALLEGIANCE_NATIVE
+    if(GetCluster())GetCluster()->InvalidateDodgeIndex();
+#endif
     ImissionIGC * pmission = GetMyMission();
     assert (IMPLIES(!pmission, dataShip->sideID == NA));
 
@@ -124,7 +130,11 @@ void    CshipIGC::ReInitialize(DataShipIGC * dataShip, Time now)
     IsideIGC * pside = pmission ? pmission->GetSide(dataShip->sideID) : NULL;
     SetSide(pside);
 
+#ifdef ALLEGIANCE_NATIVE
+    SetObjectID(dataShip->shipID);
+#else
     m_shipID = dataShip->shipID;
+#endif
     m_wingID = NA; //dataShip->wingID;
 
     m_nDeaths = dataShip->nDeaths;
@@ -270,6 +280,12 @@ void    CshipIGC::Update(Time now)
 
     if ((now > lastUpdate) && (m_pshipParent == NULL))
     {
+#ifdef ALLEGIANCE_NATIVE
+        const bool predicting = GetMyMission()->GetIgcSite()->NativePredictionMode() >= 2;
+        // Replica warnings arrive with authoritative ship state. Prediction
+        // advances equipment and motion, never the environmental damage rules.
+        if (!predicting)
+#endif
         m_warningMask = 0;
 
         float   dt = (now - lastUpdate);
@@ -358,6 +374,13 @@ void    CshipIGC::Update(Time now)
         if (m_mountedOthers[ET_Afterburner])
             m_mountedOthers[ET_Afterburner]->Update(now);
 
+#ifdef ALLEGIANCE_NATIVE
+        if (predicting)
+        {
+            TmodelIGC<IshipIGC>::Update(now);
+            return;
+        }
+#endif
         if (m_myHullType.GetHullType()->HasCapability(c_habmLifepod) &&
             (now > m_timeToDie))
         {
@@ -430,12 +453,32 @@ void    CshipIGC::Update(Time now)
     TmodelIGC<IshipIGC>::Update(now);
 }
 
+#ifdef ALLEGIANCE_NATIVE
+void CshipIGC::NativeExportIdentity(DataShipIGC& data) const
+{
+    data.hullID = m_myHullType.GetObjectID();
+    data.shipID = m_shipID;
+    data.sideID = GetSide()->GetObjectID();
+    data.nKills = m_nKills;
+    data.nDeaths = m_nDeaths;
+    data.nEjections = m_nEjections;
+    UTL::putName(data.name, GetName());
+    data.pilotType = m_pilotType;
+    data.abmOrders = m_abmOrders;
+    data.baseObjectID = m_pbaseData ? m_pbaseData->GetObjectID() : NA;
+    data.nParts = 0;
+    data.partsOffset = sizeof(data);
+}
+#endif
 int         CshipIGC::Export(void* data) const
 {
     if (data)
     {
         DataShipIGC*  dataShip = (DataShipIGC*)data;
 
+#ifdef ALLEGIANCE_NATIVE
+        NativeExportIdentity(*dataShip);
+#else
         dataShip->hullID = m_myHullType.GetObjectID();
         dataShip->shipID = m_shipID;
         dataShip->sideID = GetSide()->GetObjectID();
@@ -449,6 +492,7 @@ int         CshipIGC::Export(void* data) const
         dataShip->abmOrders = m_abmOrders;
         dataShip->baseObjectID = m_pbaseData
                                  ? m_pbaseData->GetObjectID() : NA;
+#endif
 
         dataShip->nParts = m_parts.n();
         dataShip->partsOffset = sizeof(DataShipIGC);
@@ -1216,6 +1260,12 @@ DamageResult CshipIGC::ReceiveDamage(DamageTypeID            type,
                                      const Vector&           position2,
                                      ImodelIGC*              launcher)
 {
+#ifdef ALLEGIANCE_NATIVE
+    // Collision, explosion, mine and repair outcomes belong to the authority.
+    // Suppressing only KillShipEvent leaves a zero-health replica flying.
+    if (GetMyMission()->GetIgcSite()->NativePredictionMode() >= 2)
+        return c_drNoDamage;
+#endif
     IsideIGC*   pside = GetSide();
 
     //if launcher exists and is friendly, friendly fire is off, and damage is > 0 (not repairing), do no damage.
@@ -1299,7 +1349,7 @@ DamageResult CshipIGC::ReceiveDamage(DamageTypeID            type,
             dr = c_drHullDamage;
         }
 
-#ifndef __GNUC__
+#if !defined(__GNUC__) && !defined(ALLEGIANCE_NATIVE)
 		// BT - 9/17 - Not sure why this exception is happening here. The stack traces I get from the mini-dumps are not helping much. Maybe this will
 		// show more, and also keep the server from crashing?
 		__try
@@ -1334,7 +1384,7 @@ DamageResult CshipIGC::ReceiveDamage(DamageTypeID            type,
 					dr = c_drKilled;
 				}
 			}
-#ifndef __GNUC__
+#if !defined(__GNUC__) && !defined(ALLEGIANCE_NATIVE)
         }
 		__except (StackTracer::ExceptionFilter(GetExceptionInformation()))
 		{
@@ -1460,6 +1510,9 @@ void CshipIGC::SetBaseHullType(IhullTypeIGC* newVal)
 void    CshipIGC::AddPart(IpartIGC* part)
 {
     assert (part);
+#ifdef ALLEGIANCE_NATIVE
+    ++m_nativeEquipmentRevision;
+#endif
 
     ZVerify(m_parts.last(part));
     part->AddRef();
@@ -1480,6 +1533,9 @@ void    CshipIGC::AddPart(IpartIGC* part)
 void    CshipIGC::DeletePart(IpartIGC* part)
 {
     assert (part);
+#ifdef ALLEGIANCE_NATIVE
+    ++m_nativeEquipmentRevision;
+#endif
     part->SetMountID(c_mountNA);
 
     int iPart = 0;      //NYI debug
@@ -1559,6 +1615,9 @@ void    CshipIGC::MountPart(IpartIGC*    part,
                             Mount*       pmountOld)
 {
     assert (part);
+#ifdef ALLEGIANCE_NATIVE
+    ++m_nativeEquipmentRevision;
+#endif
 
     //part must be among in the ship's part list (though this is not verified).
     IpartTypeIGC*   partType = part->GetPartType();
@@ -1612,6 +1671,9 @@ void    CshipIGC::SetStateM(int newVal)
         }
     }
 
+#ifdef ALLEGIANCE_NATIVE
+    if(((m_stateM^newVal)&miningMaskIGC) && GetCluster())GetCluster()->InvalidateDodgeIndex();
+#endif
     m_stateM = newVal;
 }
 
@@ -2428,7 +2490,8 @@ void    CshipIGC::PlotShipMove(Time          timeStop)
                                     }
                                     if (investigate) {
                                         debugf("%s: Going to investigate %s\n", GetName(), m_commandTargets[c_cmdPlan]->GetName());
-                                        DataBuoyIGC lastKnownPosBuoy;
+                                        DataBuoyIGC lastKnownPosBuoy = {};
+                                        lastKnownPosBuoy.buoyID = NA;
                                         lastKnownPosBuoy.clusterID = GetCluster()->GetObjectID();
                                         lastKnownPosBuoy.position = m_commandTargets[c_cmdPlan]->GetPosition();
                                         lastKnownPosBuoy.type = c_buoyWaypoint;
@@ -2436,6 +2499,7 @@ void    CshipIGC::PlotShipMove(Time          timeStop)
                                         ImodelIGC* buoyLastKnown = (ImodelIGC*)GetMission()->CreateObject(GetLastUpdate(), OT_buoy, &lastKnownPosBuoy, sizeof(lastKnownPosBuoy));
 
                                         SetCommand(c_cmdAccepted, buoyLastKnown, c_cidGoto);
+                                        if (buoyLastKnown) buoyLastKnown->Release();
                                         SetWingmanBehaviour(GetWingmanBehaviour() | c_wbbmTempSectorAggressive);
                                     }
                                     else {
@@ -2717,13 +2781,18 @@ void    CshipIGC::PlotShipMove(Time          timeStop)
                                 c_ttNeutral | c_ttWarp | c_ttNearest);
                             if (pmNearestAleph) {
                                 IwarpIGC* pNearestAleph = (IwarpIGC*)pmNearestAleph;
-                                if (pNearestAleph->GetDestination()->GetCluster() == GetCluster() &&
+                                if (
+#ifdef ALLEGIANCE_NATIVE
+                                    pNearestAleph->GetDestination() &&
+#endif
+                                    pNearestAleph->GetDestination()->GetCluster() == GetCluster() &&
                                     (pmNearestAleph->GetPosition() - psTarget->GetPosition()).Length() < 800.0f &&
                                     GetHullType()->GetScannerRange() > 100.0f)  // Phoenix ...
                                 {
                                     // The enemy must have just went through an aleph, follow him!
                                     //  Create buoy
-                                    DataBuoyIGC buoyData;
+                                    DataBuoyIGC buoyData = {};
+                                    buoyData.buoyID = NA;
                                     buoyData.clusterID = psTarget->GetCluster()->GetObjectID();
                                     buoyData.type = c_buoyCluster;
                                     buoyData.position = Vector(0.0f, 0.0f, 0.0f);
@@ -2733,7 +2802,8 @@ void    CshipIGC::PlotShipMove(Time          timeStop)
                                     //  Send to it
                                     debugf("%s: other cluster target near warp, goto.", GetName());
                                     SetCommand(c_cmdPlan, buoyTargetCluster, c_cidGoto);
-                                    handled = true;
+                                    if (buoyTargetCluster) buoyTargetCluster->Release();
+                                    handled = buoyTargetCluster != NULL;
                                 }
                             }
                         }
@@ -3465,12 +3535,39 @@ void CshipIGC::SetMission(ImissionIGC* pMission)
             {
                 if (m_commandTargets[i])
                 {
+#ifdef ALLEGIANCE_NATIVE
+                    // Clear the slot before releasing a buoy consumer: its
+                    // final consumer synchronously terminates it and calls
+                    // back into the site, which can inspect other commands.
+                    ImodelIGC* target = m_commandTargets[i];
+                    m_commandTargets[i] = NULL;
+                    m_commandIDs[i] = c_cidNone;
+                    if (target->GetObjectType() == OT_buoy)
+                        static_cast<IbuoyIGC*>(target)->ReleaseConsumer();
+                    target->Release();
+#else
                     m_commandTargets[i]->Release();
                     m_commandTargets[i] = NULL;
+#endif
                 }
                 m_commandIDs[i] = c_cidNone;
             }
         }
+
+        // Waypoints also own their targets. Dropping only the commands leaves
+        // mutually targeting ships alive after their mission has gone away.
+        m_gotoplan.Reset();
+
+#ifdef ALLEGIANCE_NATIVE
+        // Mission teardown detaches ships without calling Terminate. Break
+        // their remaining cross-model ownership before the core is destroyed.
+        SetRipcordModel(NULL);
+        SetLastMissileFired(NULL);
+        m_maxMineLauncher = NULL;
+        m_pclusterRequestRipcord = NULL;
+        m_miningCluster = NULL;
+        m_pbaseData = NULL;
+#endif
 
         m_myHullType.SetHullType(NULL);
 
@@ -4087,9 +4184,9 @@ void    CshipIGC::ResetWaypoint(void)
                                 pitchAngle = random(0, pi / 2);
                                 yawAngle = random(0, pi / 2);
                             } while (pitchAngle < pi / 4 && yawAngle < pi / 4);
-                            if (rand() % 2 == 0)
+                            if (randomRaw() % 2 == 0)
                                 pitchAngle = -pitchAngle;
-                            if (rand() % 2 == 0)
+                            if (randomRaw() % 2 == 0)
                                 yawAngle = -yawAngle;
                             Orientation omod = orientation;
                             omod.Pitch(pitchAngle);

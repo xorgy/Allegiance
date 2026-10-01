@@ -11,7 +11,7 @@
 **  History:
 */
 #include    "pch.h"
-#include    "PlaySoundAction.h"
+#include    "playsoundaction.h"
 
 namespace Training
 {
@@ -46,7 +46,7 @@ namespace Training
     //------------------------------------------------------------------------------
     void        PlaySoundAction::Stop (void)
     {
-        if ((m_soundID != NA) and m_bHasStarted and (m_soundInstance->IsPlaying () == S_OK))
+        if ((m_soundID != NA) and m_bHasStarted and m_soundInstance and (m_soundInstance->IsPlaying () == S_OK))
             m_soundInstance->Stop (true);
     }
 
@@ -59,7 +59,7 @@ namespace Training
     //------------------------------------------------------------------------------
     bool        PlaySoundAction::HasStopped (void) const
     {
-        if (m_soundID == NA)
+        if (m_soundID == NA || !m_soundInstance)
             return true;
         return (m_soundInstance->IsPlaying () == S_OK) ? false : true;
     }

@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "badwords.h"
+#include "../ClientCore/ChatCensor.h"
 
 // note, this became much more complex thatn I have time for, so I'm bailing out 
 // and using a cheeseball algorithm that is probably on the order of n^2 for the
@@ -227,7 +228,7 @@ void    BuildFilterAutomata (char* pBuffer)
 // table to look up lower case conversions
 //------------------------------------------------------------------------------
 //                            "\0........\t\n..\r.................. !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~................................................................................................................................."
-char* gszConvertToLowerCase = "\0........\t\n..\r.................. !\"#$%&'()*+,-./0123456789:;<=>?@abcdefghijklmnopqrstuvwxyz[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~.................................................................................................................................";
+// Case conversion is shared by ClientCore/ChatCensor.h.
 
 //------------------------------------------------------------------------------
 // resource id and other defines
@@ -247,7 +248,7 @@ void    LoadBadWords (void)
 	// orig list 
 	// memcpy(pBuffer, "zone55|fuckyou|fuck_you|fuck_u|fucku|fucka|fuckit|fuckthis|fuckme|fucker|fuckr|fucking|fuckin|fuckn|motherfucker|motherfuck|mutherfucker|fucked|f_u_c|f_ck|f_k|fahq|fck|fkyou|fu_k|fuc|fuck|fuhk|fuk|fuq|schit|sh1t|shit|shlt|shyt|niger|nigr|niggr|nigger|faggot|phaq|phuc|phuk|phuq|phvc|phvk|phvq|f__c|f__k|f__u|fuh_q|   ", 318);
     // new list provided by BlackViper with a few modifications by mmf
-    memcpy(pBuffer, "zone55|anus|a n u s|asshole|a s s h o l e|bastard|bitch|b i t c h|blowjob|b l o w j o b|clit|c l i t|cock|c0ck|cocksucker|c u m|cunt|c u n t|dick|dildo|d i l d o|faggot|f a g g o t|fatass|f uck|fugly|fux0r|fuckyou|fuck_you|fuck_u|fucku|fucka|fuckit|fuckthis|fuckme|fucker|fuckr|fucking|fuckin|fuckn|motherfucker|motherfuck|mutherfucker|fucked|f_u_c|f_ck|f_k|fahq|fck|fkyou|fu_k|fuc|fuck|f u c k|fuhk|fuk|fuq|f__c|f__k|f__u|fuh_q|gay|genital|hitler|jackoff|jism|l3itch|lesbian|masterbat|mofo|nazi|n a z i|niger|nigr|nigga|niggr|nigger|n i g g e r|nutsack|orgy|pecker|penis|p e n i s|phaq|phuc|phuk|phuck|phuq|phvc|phvk|phvq|phallus|pimp|prick|p r i c k|puss|pussy|p u s s y|s.o.b|scrotum|schit|sh1t|shit|s h i t|shlt|shyt|slut|testical|tits|t i t s|vagina|wank|whore|whoar|\x03", 774);
+    memcpy(pBuffer, Allegiance::ChatCensorWords, 774);
     if (pBuffer)
     {        
         BuildFilterAutomata (pBuffer);
@@ -259,49 +260,10 @@ void    LoadBadWords (void)
 //------------------------------------------------------------------------------
 void    FilterBadWords (char* szString)
 {
-    // this algorithm absolutely stinks. There's all sorts of holes in it. It
-    // just deserves to die horribly, but I have no time to do anything
-    // better.
-
-    // this is the set of characters we will use to obscure bad words
-    char*    random = "*&^%$#@!!@#$%^&*@$^*!#%&&%#!*^$@";
-
-    // copy the string and make it totally lowercase
-    char*   szLowerCopy = new char[strlen (szString) + 1];
-    strcpy (szLowerCopy, szString);
-    char*   tmp = szLowerCopy;
-    while (*tmp)
-    {
-        *tmp = gszConvertToLowerCase[*tmp];
-        tmp++;
-    }
-
-    // loop over all of the bad words and look for them in the string
-    for (int i = 0; i < g_iBadWordListSize; i++)
-    {
-        // perform the search on the lower case copy
-        char*   szFound = strstr (szLowerCopy, g_pBadWordList[i]);
-        while (szFound)
-        {
-            // we found a match, so figure the offset and copy the 
-            char*   cpy = g_pBadWordList[i];
-            tmp = szString + (szFound - szLowerCopy);
-            while (*cpy)
-            {
-                // we have to make the changes to the original and the copy
-                // so that we don't end up in an infinite loop
-                char    exclamation = random[(*cpy++) % 32];
-                *tmp++ = exclamation;
-                *szFound++ = exclamation;
-            }
-
-            // now search again, in case there are more instances of the word
-            szFound = strstr (szLowerCopy, g_pBadWordList[i]);
-        }
-    }
-
-    // delete the buffer
-    delete[] szLowerCopy;
+    // Retain the original allocation and prepared word table in WinTrek.
+    char* lower = new char[strlen(szString) + 1];
+    Allegiance::CensorChatInPlace(szString, lower, g_pBadWordList, g_iBadWordListSize);
+    delete[] lower;
 }
 
 //------------------------------------------------------------------------------

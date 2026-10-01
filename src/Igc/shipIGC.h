@@ -21,7 +21,11 @@
 
 class       CshipIGC;
 
-class       MyHullType : public IhullTypeIGC
+class       MyHullType
+#ifdef ALLEGIANCE_NATIVE
+final
+#endif
+: public IhullTypeIGC
 {
     public:
         MyHullType(CshipIGC*    pship)
@@ -158,7 +162,13 @@ class       MyHullType : public IhullTypeIGC
         friend class CshipIGC;
 };
 
-class       CshipIGC : public TmodelIGC<IshipIGC>
+class       CshipIGC
+#ifdef ALLEGIANCE_NATIVE
+// The native factory uses this concrete class directly; seal its vtable so
+// original simulation methods can inline their own getters.
+final
+#endif
+: public TmodelIGC<IshipIGC>
 {
     public:
         CshipIGC(void);
@@ -391,6 +401,10 @@ class       CshipIGC : public TmodelIGC<IshipIGC>
     // IshipIGC
         virtual void                SetObjectID(ObjectID id)
         {
+#ifdef ALLEGIANCE_NATIVE
+            if(GetMyMission())GetMyMission()->RekeyShipID(m_shipID,id);
+            if(m_shipID!=id && GetCluster())GetCluster()->InvalidateDodgeIndex();
+#endif
             m_shipID = id;
         }
         virtual Money               GetValue(void) const
@@ -411,7 +425,11 @@ class       CshipIGC : public TmodelIGC<IshipIGC>
 
         virtual void                SetShipID(ShipID    shipID)
         {
+#ifdef ALLEGIANCE_NATIVE
+            SetObjectID(shipID);
+#else
             m_shipID = shipID;
+#endif
         }
 
         virtual IstationIGC*         GetStation(void) const
@@ -689,6 +707,17 @@ class       CshipIGC : public TmodelIGC<IshipIGC>
             m_controls = newVal;
         }
 
+#ifdef ALLEGIANCE_NATIVE
+        uint64_t NativeEquipmentRevision() const {return m_nativeEquipmentRevision;}
+        float NativeBaseSignature() const { return TmodelIGC<IshipIGC>::GetSignature(); }
+        void NativeExportIdentity(DataShipIGC& data) const;
+        void NativeRestoreAutopilot(bool enabled) { m_bAutopilot = enabled; }
+        void NativeRestoreMotionState(const Vector& engine, float cloaking, float ripcord) {
+            m_engineVector = engine;
+            m_cloaking = cloaking;
+            m_dtRipcordCountdown = ripcord;
+        }
+#endif
         virtual const Vector&       GetEngineVector(void) const
         {
             return m_engineVector;
@@ -1835,6 +1864,9 @@ class       CshipIGC : public TmodelIGC<IshipIGC>
         }
         virtual void                SetRipcordModel(ImodelIGC*  pmodel)
         {
+#ifdef ALLEGIANCE_NATIVE
+            if(m_pmodelRipcord!=pmodel && GetCluster())GetCluster()->InvalidateDodgeIndex();
+#endif
             //Turn off cloak if ripcording
             if (pmodel && (m_stateM & cloakActiveIGC))
                 SetStateM(m_stateM & ~cloakActiveIGC);
@@ -2283,10 +2315,11 @@ class       CshipIGC : public TmodelIGC<IshipIGC>
                         if (!pmodel && m_commandTargets[c_cmdQueued]) {
                             IclusterIGC* pcommandCluster = m_commandTargets[c_cmdQueued]->GetCluster();
                             assert(pcommandCluster);
+                            const Vector origin(0.0f, 0.0f, 0.0f);
                             pmodel = FindTarget(this,
                                 c_ttNeutral | c_ttAsteroid | c_ttNearest |
                                 c_ttLeastTargeted | c_ttCowardly,
-                                NULL, pcommandCluster, &Vector(0.0f, 0.0f, 0.0f), NULL,
+                                NULL, pcommandCluster, &origin, NULL,
                                 m_abmOrders);
                             if (!pmodel && m_commandIDs[c_cmdQueued] != c_cidJoin) {
                                 //Don't remember the cluster after it's been mined out
@@ -2531,6 +2564,9 @@ class       CshipIGC : public TmodelIGC<IshipIGC>
 		virtual bool GetWantBoost() { return m_bBoost; }
 
     private:
+#ifdef ALLEGIANCE_NATIVE
+        uint64_t m_nativeEquipmentRevision{1};
+#endif
         bool    bShouldUseRipcord(IclusterIGC*  pcluster);
 
         void                WarpShip(Time           timeUpdate,

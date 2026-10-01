@@ -73,10 +73,14 @@ void            CsideIGC::Terminate(void)
     }
 
     {
-        //Clear cluster list - clusters themselves already terminated
+        // Balance the references acquired by UpdateTerritory, even when the
+        // clusters have already been terminated by the mission.
         ClusterLinkIGC* lc;
-        while (lc = m_territoryClusters.first())
+        while (lc = m_territoryClusters.first()) {
+            IclusterIGC* cluster = lc->data();
             delete lc;
+            cluster->Release();
+        }
     }
 
     m_pMission->DeleteSide(this);

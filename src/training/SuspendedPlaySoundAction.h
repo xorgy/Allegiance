@@ -14,7 +14,7 @@
 #define _SUSPENDED_PLAY_SOUND_ACTION_H_
 
 #ifndef _PLAY_SOUND_ACTION_H_
-#include    "PlaySoundAction.h"
+#include    "playsoundaction.h"
 #endif// _PLAY_SOUND_ACTION_H_
 
 namespace Training

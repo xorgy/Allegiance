@@ -4,6 +4,7 @@
 #include <surface.h>
 
 #include "efart.h"
+#include "../ClientCore/AlephEffects.h"
 
 //////////////////////////////////////////////////////////////////////////////
 //
@@ -45,6 +46,7 @@ public:
             m_countDepth * m_countSection * 6
         ),
         m_fExplodeTime (-1.0f),
+        m_fExplodeDuration(0),
         m_pevent(pevent)
     {
         m_peventSinkDelegate = CreateDelegate (this);
@@ -78,26 +80,11 @@ public:
         for(int indexDepth = 0; indexDepth < m_countDepth + 1; indexDepth++) {
             int    index = indexDepth * (m_countSection + 1);
             float radius = (float)indexDepth / m_countDepth;
-            float      z = (1 - radius) * (radius - 1); //-pow(nradius, 4);
-            float bright = 2.0f * (radius * (1.0f - radius));
-
             for (int indexSection = 0; indexSection < (m_countSection + 1); indexSection++) {
-                float angle = 2 * pi * indexSection / m_countSection;
-
-                m_vertices.Set(
-                    index + indexSection,
-                    VertexL(
-                        radius * cos(angle), 
-                        radius * sin(angle), 
-                        z,
-                        bright,
-                        bright,
-                        bright,
-                        1,
-                        0,
-                        0
-                    )
-                );
+                auto point = Allegiance::AlephPoint(radius, (float)indexSection / m_countSection);
+                m_vertices.Set(index + indexSection,
+                    VertexL(point.x, point.y, point.z, point.brightness,
+                        point.brightness, point.brightness, 1, point.u, point.v));
             }
         }
     }
@@ -125,7 +112,7 @@ public:
 
     void UpdateTextureCoordinates()
     {
-        float time = mod(m_time / 10, 1);
+        float time = Allegiance::AlephTextureOffset(m_time);
 
         for(int indexDepth = 0; indexDepth < m_countDepth + 1; indexDepth++) {
             int         index = indexDepth * (m_countSection + 1);
@@ -157,35 +144,7 @@ public:
 
     void Render(Context* pcontext)
     {
-        float   fScale = 0.1f;  // the size of the star on the aleph by default
-        float   fExplodeDelta = m_fExplodeTime - m_time; // how long 'til an explosion occurs
-        float   fPostExplosionDuration = 0.25f;
-
-        if (fExplodeDelta > -fPostExplosionDuration) // if an explosion is impending or has *just* happened
-        {
-            float   fMaxSwellSize = 6.0f - fScale;
-            if (fExplodeDelta >= 0.0f)
-            {
-                // an explosion is pending, but hasn't happened yet
-                fExplodeDelta = 1.0f - (fExplodeDelta / m_fExplodeDuration);
-
-                // scale the star on the aleph accordingly
-                float   fNewScale = (fExplodeDelta * fExplodeDelta * fMaxSwellSize);
-
-                // now add a "resonant pulse" to it
-                float   fNumPulses = 8.0f;
-                float   fCosine = fabsf (sinf (pi * (fNumPulses + 0.5f) * fExplodeDelta));
-                fScale += (fNewScale * fCosine * fCosine) + (fNewScale * 0.8f);
-            }
-            else
-            {
-                // an explosion has just happened
-                fExplodeDelta = 1.0f + (fExplodeDelta / fPostExplosionDuration);
-
-                // scale the star on the aleph accordingly
-                fScale += (fExplodeDelta * fExplodeDelta * fMaxSwellSize);
-            }
-        }
+        float fScale = Allegiance::AlephStarScale(m_fExplodeTime - m_time, m_fExplodeDuration);
 
         pcontext->DrawDecal(
             m_pimageStar->GetSurface(), 

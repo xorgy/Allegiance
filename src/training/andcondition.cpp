@@ -11,7 +11,7 @@
 **  History:
 */
 #include    "pch.h"
-#include    "AndCondition.h"
+#include    "andcondition.h"
 
 namespace Training
 {

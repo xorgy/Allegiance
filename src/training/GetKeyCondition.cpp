@@ -12,7 +12,7 @@
 */
 #include    "pch.h"
 #include    "GetKeyCondition.h"
-#include    "TrainingMission.h"
+#include    "trainingmission.h"
 
 namespace Training
 {
@@ -33,6 +33,7 @@ namespace Training
     //------------------------------------------------------------------------------
     /* void */  GetKeyCondition::~GetKeyCondition (void)
     {
+        if (g_pMission) g_pMission->RemoveKeyCondition(this);
     }
 
     //------------------------------------------------------------------------------

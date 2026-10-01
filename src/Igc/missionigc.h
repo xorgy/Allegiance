@@ -16,6 +16,21 @@
 #ifndef __MISSIONIGC_H_
 #define __MISSIONIGC_H_
 #include "igc.h"
+#ifdef ALLEGIANCE_NATIVE
+#include <bitset>
+#include <array>
+#include <vector>
+// Non-owning static-definition index. Legacy lists retain order and ownership;
+// lifecycle callbacks update this compact, ID-addressed native lookup.
+template<class T> class NativeStaticIndex {
+    std::vector<T*> slots;
+public:
+    void add(T* object){auto id=uint16_t(object->GetObjectID());if(id>=slots.size())slots.resize(size_t(id)+1);
+        assert(!slots[id] || slots[id]==object);slots[id]=object;}
+    void remove(T* object){auto id=uint16_t(object->GetObjectID());if(id<slots.size() && slots[id]==object)slots[id]=nullptr;}
+    T* get(ObjectID id)const{auto index=uint16_t(id);return index<slots.size()?slots[index]:nullptr;}
+};
+#endif
 
 
 struct  Constants
@@ -178,15 +193,25 @@ class   CstaticIGC
         }
         void                            AddDroneType(IdroneTypeIGC*                 dt)
         {
+#ifdef ALLEGIANCE_NATIVE
+            m_nativeDroneTypeIndex.add(dt);
+#endif
             AddIbaseIGC((BaseListIGC*)&m_droneTypes, dt);
         }
         void                            DeleteDroneType(IdroneTypeIGC*              dt)
         {
+#ifdef ALLEGIANCE_NATIVE
+            m_nativeDroneTypeIndex.remove(dt);
+#endif
             DeleteIbaseIGC((BaseListIGC*)&m_droneTypes, dt);
         }
         IdroneTypeIGC*                  GetDroneType(DroneTypeID                    id) const
         {
+#ifdef ALLEGIANCE_NATIVE
+            return m_nativeDroneTypeIndex.get(id);
+#else
             return (IdroneTypeIGC*)GetIbaseIGC((BaseListIGC*)&m_droneTypes, id);
+#endif
         }
         const DroneTypeListIGC*         GetDroneTypes(void) const
         {
@@ -195,15 +220,25 @@ class   CstaticIGC
 
         void                            AddDevelopment(IdevelopmentIGC*             d)
         {
+#ifdef ALLEGIANCE_NATIVE
+            m_nativeDevelopmentIndex.add(d);
+#endif
             AddIbaseIGC((BaseListIGC*)&m_developments, d);
         }
         void                            DeleteDevelopment(IdevelopmentIGC*          d)
         {
+#ifdef ALLEGIANCE_NATIVE
+            m_nativeDevelopmentIndex.remove(d);
+#endif
             DeleteIbaseIGC((BaseListIGC*)&m_developments, d);
         }
         IdevelopmentIGC*                GetDevelopment(DevelopmentID                id) const
         {
+#ifdef ALLEGIANCE_NATIVE
+            return m_nativeDevelopmentIndex.get(id);
+#else
             return (IdevelopmentIGC*)GetIbaseIGC((BaseListIGC*)&m_developments, id);
+#endif
         }
         const DevelopmentListIGC*       GetDevelopments(void) const
         {
@@ -212,15 +247,25 @@ class   CstaticIGC
 
         void                            AddStationType(IstationTypeIGC*             st)
         {
+#ifdef ALLEGIANCE_NATIVE
+            m_nativeStationTypeIndex.add(st);
+#endif
             AddIbaseIGC((BaseListIGC*)&m_stationTypes, st);
         }
         void                            DeleteStationType(IstationTypeIGC*          st)
         {
+#ifdef ALLEGIANCE_NATIVE
+            m_nativeStationTypeIndex.remove(st);
+#endif
             DeleteIbaseIGC((BaseListIGC*)&m_stationTypes, st);
         }
         IstationTypeIGC*                GetStationType(StationTypeID                id) const
         {
+#ifdef ALLEGIANCE_NATIVE
+            return m_nativeStationTypeIndex.get(id);
+#else
             return (IstationTypeIGC*)GetIbaseIGC((BaseListIGC*)&m_stationTypes, id);
+#endif
         }
         const StationTypeListIGC*       GetStationTypes(void) const
         {
@@ -229,15 +274,25 @@ class   CstaticIGC
 
         void                            AddCivilization(IcivilizationIGC*           c)
         {
+#ifdef ALLEGIANCE_NATIVE
+            m_nativeCivilizationIndex.add(c);
+#endif
             AddIbaseIGC((BaseListIGC*)&m_civilizations, c);
         }
         void                            DeleteCivilization(IcivilizationIGC*        c)
         {
+#ifdef ALLEGIANCE_NATIVE
+            m_nativeCivilizationIndex.remove(c);
+#endif
             DeleteIbaseIGC((BaseListIGC*)&m_civilizations, c);
         }
         IcivilizationIGC*               GetCivilization(CivID                       id) const
         {
+#ifdef ALLEGIANCE_NATIVE
+            return m_nativeCivilizationIndex.get(id);
+#else
             return (IcivilizationIGC*)GetIbaseIGC((BaseListIGC*)&m_civilizations, id);
+#endif
         }
         const CivilizationListIGC*      GetCivilizations(void) const
         {
@@ -246,15 +301,25 @@ class   CstaticIGC
 
         void                            AddHullType(IhullTypeIGC*                   ht)
         {
+#ifdef ALLEGIANCE_NATIVE
+            m_nativeHullTypeIndex.add(ht);
+#endif
             AddIbaseIGC((BaseListIGC*)&m_hullTypes, ht);
         }
         void                            DeleteHullType(IhullTypeIGC*                ht)
         {
+#ifdef ALLEGIANCE_NATIVE
+            m_nativeHullTypeIndex.remove(ht);
+#endif
             DeleteIbaseIGC((BaseListIGC*)&m_hullTypes, ht);
         }
         IhullTypeIGC*                   GetHullType(HullID                          id) const
         {
+#ifdef ALLEGIANCE_NATIVE
+            return m_nativeHullTypeIndex.get(id);
+#else
             return (IhullTypeIGC*)GetIbaseIGC((BaseListIGC*)&m_hullTypes, id);
+#endif
         }
         const HullTypeListIGC*          GetHullTypes(void) const
         {
@@ -263,15 +328,25 @@ class   CstaticIGC
 
         void                            AddExpendableType(IexpendableTypeIGC*             mt)
         {
+#ifdef ALLEGIANCE_NATIVE
+            m_nativeExpendableTypeIndex.add(mt);
+#endif
             AddIbaseIGC((BaseListIGC*)&m_expendableTypes, mt);
         }
         void                            DeleteExpendableType(IexpendableTypeIGC*          mt)
         {
+#ifdef ALLEGIANCE_NATIVE
+            m_nativeExpendableTypeIndex.remove(mt);
+#endif
             DeleteIbaseIGC((BaseListIGC*)&m_expendableTypes, mt);
         }
         IexpendableTypeIGC*             GetExpendableType(ExpendableTypeID                id) const
         {
+#ifdef ALLEGIANCE_NATIVE
+            return m_nativeExpendableTypeIndex.get(id);
+#else
             return (IexpendableTypeIGC*)GetIbaseIGC((BaseListIGC*)&m_expendableTypes, id);
+#endif
         }
         const ExpendableTypeListIGC*    GetExpendableTypes(void) const
         {
@@ -280,6 +355,9 @@ class   CstaticIGC
 
         void                            AddPartType(IpartTypeIGC*                   pt)
         {
+#ifdef ALLEGIANCE_NATIVE
+            m_nativePartTypeIndex.add(pt);
+#endif
             AddIbaseIGC((BaseListIGC*)&m_partTypes, pt);
 
             if (pt->GetEquipmentType() == ET_Pack)
@@ -305,11 +383,18 @@ class   CstaticIGC
         }
         void                            DeletePartType(IpartTypeIGC*                pt)
         {
+#ifdef ALLEGIANCE_NATIVE
+            m_nativePartTypeIndex.remove(pt);
+#endif
             DeleteIbaseIGC((BaseListIGC*)&m_partTypes, pt);
         }
         IpartTypeIGC*                   GetPartType(PartID                          id) const
         {
+#ifdef ALLEGIANCE_NATIVE
+            return m_nativePartTypeIndex.get(id);
+#else
             return (IpartTypeIGC*)GetIbaseIGC((BaseListIGC*)&m_partTypes, id);
+#endif
         }
         const PartTypeListIGC*          GetPartTypes(void) const
         {
@@ -318,15 +403,25 @@ class   CstaticIGC
 
         virtual void                            AddTreasureSet(ItreasureSetIGC*                   pt)
         {
+#ifdef ALLEGIANCE_NATIVE
+            m_nativeTreasureSetIndex.add(pt);
+#endif
             AddIbaseIGC((BaseListIGC*)&m_treasureSets, pt);
         }
         virtual void                            DeleteTreasureSet(ItreasureSetIGC*                pt)
         {
+#ifdef ALLEGIANCE_NATIVE
+            m_nativeTreasureSetIndex.remove(pt);
+#endif
             DeleteIbaseIGC((BaseListIGC*)&m_treasureSets, pt);
         }
         virtual ItreasureSetIGC*                GetTreasureSet(TreasureSetID                      id) const
         {
+#ifdef ALLEGIANCE_NATIVE
+            return m_nativeTreasureSetIndex.get(id);
+#else
             return (ItreasureSetIGC*)GetIbaseIGC((BaseListIGC*)&m_treasureSets, id);
+#endif
         }
         virtual const TreasureSetListIGC*       GetTreasureSets(void) const
         {
@@ -335,15 +430,25 @@ class   CstaticIGC
 
         void                            AddProjectileType(IprojectileTypeIGC*       pt)
         {
+#ifdef ALLEGIANCE_NATIVE
+            m_nativeProjectileTypeIndex.add(pt);
+#endif
             AddIbaseIGC((BaseListIGC*)&m_projectileTypes, pt);
         }
         void                            DeleteProjectileType(IprojectileTypeIGC*    pt)
         {
+#ifdef ALLEGIANCE_NATIVE
+            m_nativeProjectileTypeIndex.remove(pt);
+#endif
             DeleteIbaseIGC((BaseListIGC*)&m_projectileTypes, pt);
         }
         IprojectileTypeIGC*             GetProjectileType(ProjectileTypeID  id) const
         {
+#ifdef ALLEGIANCE_NATIVE
+            return m_nativeProjectileTypeIndex.get(id);
+#else
             return (IprojectileTypeIGC*)GetIbaseIGC((BaseListIGC*)&m_projectileTypes, id);
+#endif
         }
         const ProjectileTypeListIGC*    GetProjectileTypes(void) const
         {
@@ -361,6 +466,18 @@ class   CstaticIGC
         }
 
     private:
+
+#ifdef ALLEGIANCE_NATIVE
+        NativeStaticIndex<IcivilizationIGC> m_nativeCivilizationIndex;
+        NativeStaticIndex<IhullTypeIGC> m_nativeHullTypeIndex;
+        NativeStaticIndex<IexpendableTypeIGC> m_nativeExpendableTypeIndex;
+        NativeStaticIndex<IpartTypeIGC> m_nativePartTypeIndex;
+        NativeStaticIndex<ItreasureSetIGC> m_nativeTreasureSetIndex;
+        NativeStaticIndex<IprojectileTypeIGC> m_nativeProjectileTypeIndex;
+        NativeStaticIndex<IstationTypeIGC> m_nativeStationTypeIndex;
+        NativeStaticIndex<IdroneTypeIGC> m_nativeDroneTypeIndex;
+        NativeStaticIndex<IdevelopmentIGC> m_nativeDevelopmentIndex;
+#endif
         HullTypeListIGC          m_hullTypes;
         PartTypeListIGC          m_partTypes;
         ProjectileTypeListIGC    m_projectileTypes;
@@ -382,6 +499,15 @@ class   CstaticIGC
 class   CmissionIGC : public ImissionIGC
 {
     public:
+#ifdef ALLEGIANCE_NATIVE
+        void NativeSetTime(Time now) { m_lastUpdate=now; }
+        void NativeAddMissile(ImissileIGC* missile) override {
+            auto& slot=m_nativeMissileIndex[uint16_t(missile->GetObjectID())];assert(!slot || slot==missile);slot=missile;
+        }
+        void NativeDeleteMissile(ImissileIGC* missile) override {
+            auto& slot=m_nativeMissileIndex[uint16_t(missile->GetObjectID())];if(slot==missile)slot=nullptr;
+        }
+#endif
         CmissionIGC(void)
         :
             m_pIgcSite(NULL),
@@ -711,6 +837,14 @@ class   CmissionIGC : public ImissionIGC
         virtual const ClusterListIGC*           GetClusters(void) const;
 
         //Global list of ships
+#ifdef ALLEGIANCE_NATIVE
+        void RekeyShipID(ShipID oldID,ShipID newID) override {
+            if(oldID==newID)return;
+            IshipIGC* ship=oldID>=0?m_nativeShipIndex[oldID]:nullptr;
+            if(oldID>=0){m_reservedShipIDs.reset(oldID);m_nativeShipIndex[oldID]=nullptr;}
+            if(newID>=0){m_reservedShipIDs.set(newID);m_nativeShipIndex[newID]=ship;}
+        }
+#endif
         virtual void                            AddShip(IshipIGC* s);
         virtual void                            DeleteShip(IshipIGC* s);
         virtual IshipIGC*                       GetShip(ShipID shipID) const;
@@ -856,7 +990,12 @@ class   CmissionIGC : public ImissionIGC
 
         ShipID                  GenerateNewShipID(void)
         {
+#ifdef ALLEGIANCE_NATIVE
+            for(int attempt=0;attempt<32768;++attempt){int id=m_nextShipID;m_nextShipID=(id+1)&32767;if(!m_reservedShipIDs.test(id)){m_reservedShipIDs.set(id);return ShipID(id);}}
+            return NA;
+#else
             return m_nextShipID++;
+#endif
         }
 
         AsteroidID              GenerateNewAsteroidID(void)
@@ -866,7 +1005,13 @@ class   CmissionIGC : public ImissionIGC
 
         TreasureID              GenerateNewTreasureID(void)
         {
+#ifdef ALLEGIANCE_NATIVE
+            for(int attempt=0;attempt<65536;++attempt){uint16_t id=uint16_t(m_nextTreasureID);m_nextTreasureID=TreasureID(uint16_t(id+1));
+                if(id!=uint16_t(NA) && !m_nativeTreasureIndex[id])return TreasureID(id);}
+            return NA;
+#else
             return m_nextTreasureID++;
+#endif
         }
 
         MineID                  GenerateNewMineID(void)
@@ -879,7 +1024,20 @@ class   CmissionIGC : public ImissionIGC
         }
         MissileID                  GenerateNewMissileID(void)
         {
+#ifdef ALLEGIANCE_NATIVE
+            // Separate namespaces, never NA, and never recycle a live missile.
+            bool prediction=m_pIgcSite->NativePredictionMode()>=2;
+            unsigned count=prediction?32767:32768;
+            for(unsigned n=0;n<count;++n) {
+                unsigned next=uint16_t(m_nextMissileID)%count;
+                m_nextMissileID=MissileID((next+1)%count);
+                MissileID id=prediction?MissileID(-2-int(next)):MissileID(next);
+                if(!m_nativeMissileIndex[uint16_t(id)])return id;
+            }
+            return NA;
+#else
             return m_nextMissileID++;
+#endif
         }
         StationID                  GenerateNewStationID(void)
         {
@@ -949,7 +1107,15 @@ class   CmissionIGC : public ImissionIGC
         Time                     m_lastUpdate;
 
         BuoyID                   m_nextBuoyID;
+#ifdef ALLEGIANCE_NATIVE
+        int                      m_nextShipID;
+        std::array<IshipIGC*,32768> m_nativeShipIndex{};
+        std::array<ImissileIGC*,65536> m_nativeMissileIndex{};
+        std::array<ItreasureIGC*,65536> m_nativeTreasureIndex{};
+        std::bitset<32768>        m_reservedShipIDs;
+#else
         ShipID                   m_nextShipID;
+#endif
         AsteroidID               m_nextAsteroidID;
         TreasureID               m_nextTreasureID;
         MineID                   m_nextMineID;

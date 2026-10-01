@@ -11,7 +11,7 @@
 **  History:
 */
 #include    "pch.h"
-#include    "NoAction.h"
+#include    "noaction.h"
 
 namespace Training
 {

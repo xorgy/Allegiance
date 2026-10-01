@@ -14,31 +14,31 @@
 #include    "Mission3.h"
 
 #include    "Training.h"
-#include    "GoalList.h"
+#include    "goallist.h"
 #include    "Predicate.h"
-#include    "TrueCondition.h"
-#include    "FalseCondition.h"
-#include    "AndCondition.h"
-#include    "OrCondition.h"
-#include    "NotCondition.h"
-#include    "PeriodicCondition.h"
-#include    "ElapsedTimeCondition.h"
-#include    "ObjectMovingTowardsCondition.h"
-#include    "ObjectWithinRadiusCondition.h"
-#include    "ObjectPointingAtCondition.h"
-#include    "ConditionalAction.h"
-#include    "ConditionList.h"
-#include    "ActionList.h"
-#include    "MessageAction.h"
-#include    "PlaySoundAction.h"
-#include    "SetCommandAction.h"
-#include    "NoAction.h"
-#include    "NTimesCondition.h"
-#include    "EndMissionAction.h"
-#include    "ResetAction.h"
-#include    "ResetShipAction.h"
-#include    "SoundFinishedCondition.h"
-#include    "SetDisplayModeAction.h"
+#include    "truecondition.h"
+#include    "falsecondition.h"
+#include    "andcondition.h"
+#include    "orcondition.h"
+#include    "notcondition.h"
+#include    "periodiccondition.h"
+#include    "elapsedtimecondition.h"
+#include    "objectmovingtowardscondition.h"
+#include    "objectwithinradiuscondition.h"
+#include    "objectpointingatcondition.h"
+#include    "conditionalaction.h"
+#include    "conditionlist.h"
+#include    "actionlist.h"
+#include    "messageaction.h"
+#include    "playsoundaction.h"
+#include    "setcommandaction.h"
+#include    "noaction.h"
+#include    "ntimescondition.h"
+#include    "endmissionaction.h"
+#include    "resetaction.h"
+#include    "resetshipaction.h"
+#include    "soundfinishedcondition.h"
+#include    "setdisplaymodeaction.h"
 #include    "TurnShipAboutCondition.h"
 #include    "GetRadarLODCondition.h"
 #include    "SetRadarLODAction.h"
@@ -176,10 +176,27 @@ namespace Training
         // put an anti-shield weapon on the ship
         AddPartToShip(92, 0, 0);
 
-        // take the missiles off the ship
+        // The lesson later mounts a missile reserve. Modern default cargo can
+        // fill every slot with ammo, fuel and mines, so preserve the launcher
+        // in cargo when that loadout has no missile reserve of its own.
         pPart = pShip->GetMountedPart(ET_Magazine, 0);
         if (pPart)
-            pPart->Terminate();
+        {
+            bool hasReserve = false;
+            Mount cargo = -c_maxCargo;
+            for (Mount m = -1; m >= -c_maxCargo; --m)
+            {
+                IpartIGC* reserve = pShip->GetMountedPart(NA, m);
+                if (!reserve) cargo = m;
+                else if (reserve->GetEquipmentType() == ET_Magazine) hasReserve = true;
+            }
+            if (hasReserve) pPart->Terminate();
+            else
+            {
+                if (IpartIGC* reserve = pShip->GetMountedPart(NA, cargo)) reserve->Terminate();
+                pPart->SetMountID(cargo);
+            }
+        }
 
         // activate only the starting weapon
         trekClient.SetSelectedWeapon(0);

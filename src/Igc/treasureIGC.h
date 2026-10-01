@@ -19,9 +19,27 @@
 #include "igc.h"
 #include "modelIGC.h"
 
-class CtreasureIGC : public TmodelIGC<ItreasureIGC>
+class CtreasureIGC
+#ifdef ALLEGIANCE_NATIVE
+// The native factory uses this concrete class directly; seal its vtable so
+// original simulation methods can inline their own getters.
+final
+#endif
+: public TmodelIGC<ItreasureIGC>
 {
     public:
+#ifdef ALLEGIANCE_NATIVE
+        struct NativeSpin { Vector forward, up; Time time; };
+        const NativeSpin& NativeSpinAnchor() {
+            if (!m_nativeSpinValid) {
+                m_nativeSpin={GetOrientation().GetForward(),GetOrientation().GetUp(),GetLastUpdate()};
+                m_nativeSpinValid=true;
+            }
+            return m_nativeSpin;
+        }
+        Time NativeExpireTime() const { return m_expire; }
+        void NativeSetExpireTime(Time time) { m_expire=time; }
+#endif
     // IbaseIGC
         virtual HRESULT         Initialize(ImissionIGC* pMission, Time now, const void* data, int length);
         virtual void    Terminate(void)
@@ -140,6 +158,10 @@ class CtreasureIGC : public TmodelIGC<ItreasureIGC>
         }
 
     private:
+#ifdef ALLEGIANCE_NATIVE
+        NativeSpin m_nativeSpin{};
+        bool m_nativeSpinValid{};
+#endif
         DataTreasureIGC     m_data;
         IbuyableIGC*        m_buyable;
         Time                m_expire;

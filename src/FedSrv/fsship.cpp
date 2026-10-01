@@ -9,6 +9,7 @@
  *-----------------------------------------------------------------------*/
 
 #include "pch.h"
+#include "../ClientCore/PlayerEconomy.h"
 
 
 // Statics
@@ -1300,31 +1301,11 @@ void CFSPlayer::SetAutoDonate(CFSPlayer* pplayer, Money amount, bool bSend)
   IshipIGC* pship;
   if (pplayer)
   {
-      pship = pplayer->GetIGCShip()->GetAutoDonate();
-      if (pship == NULL)
-          pship = pplayer->GetIGCShip();
-      else
-      {
-          assert (pship->GetAutoDonate() == NULL);
-
-          CFSPlayer*    pplayerNew = ((CFSShip*)(pship->GetPrivateData()))->GetPlayer();
-
-          if (pplayerNew == this)
-          {
-              //We are trying to autodonate to someone who is already autodonating to us
-              //Tell them to stop first (but don't send any messages)
-              pplayer->SetAutoDonate(NULL, 0, false);
-
-              //and then set our autodonate to go to them anyhow
-              pship = pplayer->GetIGCShip();
-          }
-          else
-          {
-              //The person we would like to donate to was already donating to someone else
-              //donate to who ever they were donating to.
-              pplayer = pplayerNew;
-          }
-      }
+      pship = Allegiance::AutoDonationTarget(GetIGCShip(), pplayer->GetIGCShip(),
+          [](IshipIGC* ship) {
+              ((CFSShip*)(ship->GetPrivateData()))->GetPlayer()->SetAutoDonate(NULL, 0, false);
+          });
+      pplayer = ((CFSShip*)(pship->GetPrivateData()))->GetPlayer();
 
       assert (pship->GetAutoDonate() == NULL);
       assert (pplayer->GetIGCShip() == pship);

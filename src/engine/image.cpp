@@ -1,4 +1,5 @@
 #include "image.h"
+#include "../ClientCore/AuthoredText.h"
 
 #include <base.h>
 
@@ -259,73 +260,13 @@ public:
 
     ZString BreakLine(ZString& str, int width)
     {
-        ZString strSave = str;
-
-        //
-        // Search forward for any new lines
-        //
-
-        int indexNewLine = str.Find("\n");
-        if (indexNewLine == -1) {
-            indexNewLine = str.GetLength();
-        }
-
-        //
-        // Figure out how many characters fit on the line
-        //
-
-        int nchar = m_pfont->GetMaxTextLength(str, width, true);
-
-        //
-        // Chop off at the newline
-        //
-
-        if (nchar >= indexNewLine) {
-            nchar = indexNewLine;
-        } else {
-            //
-            // Search backwards for the first space
-            //
-
-            if (nchar != str.GetLength()) {
-                for (int index = nchar - 1; index >= 0; index--) {
-                    if (str[index] == ' ') {
-                        while (index > 0) {
-                            if (str[index] != ' ') {
-                                nchar = index + 1;
-                                break;
-                            }
-                            index--;
-                        }
-                        break;
-                    }
-                }
-            }
-        }
-
-        if (nchar < str.GetLength()) {
-            str = strSave.RightOf(nchar + 1);
-            return strSave.Left(nchar);
-        } else {
-            //
-            // remove any leading spaces from the next line
-            //
-
-            str = strSave.RightOf(nchar);
-
-            int length = str.GetLength();
-            int index = 0;
-
-            while (index < length && str[index] == ' ') {
-                index++;
-            }
-
-            if (index != 0) {
-                str = str.RightOf(index);
-            }
-
-            return strSave.Left(nchar);
-        }
+        auto line = Allegiance::BreakImageLine(
+            std::string_view(str, str.GetLength()), width,
+            [&](std::string_view, int limit) { return m_pfont->GetMaxTextLength(str, limit, true); }
+        );
+        ZString result = str.Left(line.length);
+        str = str.RightOf(line.consumed);
+        return result;
     }
 
     //////////////////////////////////////////////////////////////////////////////

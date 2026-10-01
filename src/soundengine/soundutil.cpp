@@ -7,7 +7,9 @@
 #include "soundutil.h"
 
 #include <algorithm>
+#ifndef ALLEGIANCE_NATIVE
 #include <vorbis/vorbisfile.h>
+#endif
 
 #include "soundbase.h"
 
@@ -20,6 +22,7 @@ namespace SoundEngine {
 //
 //////////////////////////////////////////////////////////////////////////////
 
+#ifndef ALLEGIANCE_NATIVE
 class SoundFile : public ISoundPCMData  SoundDebugImpl
 {
 private:
@@ -514,6 +517,8 @@ HRESULT LoadWaveFile(TRef<ISoundPCMData>& data, const ZString& strFilename, cons
 // CreateDummyPCMData function
 //
 //////////////////////////////////////////////////////////////////////////////
+
+#endif // Native LoadWaveFile uses FFmpeg in the audio adapter.
 
 class DummyPCMDataImpl : public ISoundPCMData
 {

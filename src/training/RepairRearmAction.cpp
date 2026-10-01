@@ -12,7 +12,7 @@
 */
 #include    "pch.h"
 #include    "RepairRearmAction.h"
-#include    "TrainingMission.h"
+#include    "trainingmission.h"
 
 namespace Training
 {

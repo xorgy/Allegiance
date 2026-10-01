@@ -1,4 +1,6 @@
 #include "pch.h"
+#include "../ClientCore/WeaponIndicator.h"
+#include "../ClientCore/TrainingPresentation.h"
 
 //////////////////////////////////////////////////////////////////////////////
 //
@@ -213,9 +215,9 @@ public:
                 // or it is the external chase view or missile view
                 IsideIGC*   pside = trekClient.GetSide();
                 //Imago fixed 7/8/09 ALLY
-                if (w && ((GetWindow()->GetCameraMode() == TrekWindow::cmExternalChase) ||
-                    (GetWindow()->GetCameraMode() == TrekWindow::cmExternalMissile) ||
-                    (((targetModel->GetSide() == pside) || IsideIGC::AlliedSides(targetModel->GetSide(), pside)) == (w->GetProjectileType()->GetPower() < 0.0f))))
+                if (Allegiance::WeaponIndicatorTarget(w, targetModel, pside,
+                    GetWindow()->GetCameraMode() == TrekWindow::cmExternalChase ||
+                    GetWindow()->GetCameraMode() == TrekWindow::cmExternalMissile))
                 {
                     Vector      vecLeadPosition;
                     float       t = solveForLead(pship, targetModel, w, &vecLeadPosition);
@@ -245,18 +247,13 @@ public:
                         float               fDistanceBetweenShips = (targetPosition - shipPosition).Length();
 
                         // compute the distance at which a hit could occur
-                        float               fLengthAlongTargetVector = t * fProjectileSpeed;
+
 
                         // get the camera position
                         Vector              cameraPosition = GetWindow()->GetCamera()->GetPosition();
 
                         // compute values needed for determining which indicators to draw
                         float               fCosAngle = vecLeadPosition * shipAimDirection;
-                        float               fA = fLengthAlongTargetVector;
-                        float               fH = fA / fCosAngle;
-                        float               fHASquared = (fH * fH) - (fA * fA);
-                        float               fRadiusSquared = fTargetRadius * fTargetRadius;
-                        bool                bWillHit = (fHASquared <= fRadiusSquared) ? true : false;
 
                         // project a tracking point at the target range
                         Vector              trackingRelativeToShip = shipAimDirection * fDistanceBetweenShips;
@@ -268,7 +265,7 @@ public:
                             pcontext->SetBlendMode(BlendModeAdd);
                             if (bIisInRange)
                             {
-                                float   green = bWillHit ? 1.0f - (fHASquared / fRadiusSquared) : 0.0f;
+                                float green = Allegiance::ExternalAimGreen(t, fProjectileSpeed, fCosAngle, fTargetRadius);
                                 pcontext->DrawImage3D(m_psurfaceCenterOutRange, Color(1.0f - green, green, 0.0f), true, pointLead);
                             }
                             else
@@ -284,44 +281,7 @@ public:
                         {
                             pointLead = rect.TransformNDCToImage(pointLead);
 
-                            bool    bLeadIndicator;
-                            if (pshipParent || pship->GetBaseHullType()->HasCapability(c_habmLeadIndicator) /*|| g_bCheatLeadIndicator*/)
-                            {
-                                bLeadIndicator = true;
-                            }
-                            else
-                            {
-                                bLeadIndicator = false;
-                                //See if a friendly relay station can spot the target
-                                for (StationLinkIGC* psl = pcluster->GetStations()->first(); (psl != NULL); psl = psl->next())
-                                {
-                                    IstationIGC*   ps = psl->data();
-                                    if ((ps->GetSide() == pside) &&
-                                        ps->GetBaseStationType()->HasCapability(c_sabmRemoteLeadIndicator) &&
-                                        ps->InScannerRange(targetModel))
-                                    {
-                                        bLeadIndicator = true;
-                                        break;
-                                    }
-                                }
-
-                                //See if a friendly relay ship can spot the target
-                                if (!bLeadIndicator)
-                                {
-                                    for (ShipLinkIGC* psl = pcluster->GetShips()->first(); (psl != NULL); psl = psl->next())
-                                    {
-                                        IshipIGC*   ps = psl->data();
-                                        if ((ps->GetSide() == pside) && //#ALLYTD: change this if allies should relay lead ind SCAN
-                                            (ps->GetParentShip() == NULL) &&
-                                            ps->GetBaseHullType()->HasCapability(c_habmRemoteLeadIndicator) &&
-                                            ps->InScannerRange(targetModel))
-                                        {
-                                            bLeadIndicator = true;
-                                            break;
-                                        }
-                                    }
-                                }
-                            }
+                            bool bLeadIndicator = Allegiance::HasLeadIndicator(pship, targetModel, pshipParent != NULL);
 
                             if (bLeadIndicator)
                             {
@@ -339,17 +299,7 @@ public:
                                 float   l2 = dx * dx + dy * dy;
                                 float   r = targetModel->GetThingSite()->GetScreenRadius();
 
-                                float   g;
-                                float   f = l2 / (r * r);
-                                if (f < 2.0f)
-                                {
-                                    if (f < 1.0f)
-                                        g = 1.0f - f * 0.75f;
-                                    else
-                                        g = 0.5f - f / 4.0f;
-                                }
-                                else
-                                    g = 0.0f;
+                                float g = Allegiance::CockpitAimGreen(l2, r * r);
 
                                 /*
                                 Surface*    psurfaceIndicator   = m_psurfaceCenterOutRange;
@@ -460,14 +410,14 @@ public:
 
     void RenderTrainingOverlay(Context* pContext)
     {
+        if (s_trainingOverlay == NoTrainingOverlay)
+            return;
         // the training overlay consists of two lines in an angular formation,
         // a hilite dot, and some text describing the element referred to.
         Rect                rect = GetViewRect()->GetValue();
-        Point               pointCenter = rect.Center();
         Point               pointA;
         Point               pointB;
         Point               pointC;
-        Point               pointDelta;
         Point               pointText;
         Point				pointText2;
         Point               pointTextSize;
@@ -477,231 +427,14 @@ public:
         ZString				description2;
         Color               colorLine(1.0f, 0.0f, 0.0f, 0.9f);
 
-        // depending on the overlay we want to draw, this sets the point for the hilite dot,
-        // the direction that the arrow will draw from, the second point in the hilite line,
-        // and the textual description
-        switch (s_trainingOverlay)
-        {
-        case NoTrainingOverlay:
+        const auto callout = Allegiance::TrainingCalloutFor(s_trainingOverlay,
+            rect.XMin(), rect.YMin(), rect.XMax(), rect.YMax());
+        if (!*callout.description)
             return;
-
-        case SpeedTrainingOverlay:
-        {
-            pointDelta = Point(-1.0f, -1.0f);
-            pointA = pointCenter + Point(-25.0f, -105.5f);
-            pointB = pointA + (pointDelta * 100.0f);
-            description = "SPEED (meters per second)";
-            break;
-        }
-
-        case MotionIndicatorTrainingOverlay:
-        {
-            pointDelta = Point(-1.0f, 1.0f);
-            pointA = pointCenter + Point(-10.5f, 10.5f);
-            pointB = pointA + (pointDelta * 150.0f);
-            description = "MOTION INDICATOR";
-            break;
-        }
-
-        case ReticuleTrainingOverlay:
-        {
-            pointDelta = Point(-1.0f, 1.0f);
-            pointA = pointCenter + Point(-10.5f, 10.5f);
-            pointB = pointA + (pointDelta * 150.0f);
-            description = "RETICULE";
-            break;
-        }
-
-        case ThrottleTrainingOverlay:
-        {
-            pointDelta = Point(-1.0f, 1.0f);
-            pointA = pointCenter + Point(-126.5f, 93.5f);
-            pointB = pointA + (pointDelta * 50.0f);
-            description = "THROTTLE GAUGE";
-            description2 = "SCROLL WHEEL ALSO CONTROLS THROTTLE";
-            break;
-        }
-
-        case FuelTrainingOverlay:
-        {
-            pointDelta = Point(1.0f, 1.0f);
-            pointA = pointCenter + Point(126.5f, 93.5f);
-            pointB = pointA + (pointDelta * 100.0f);
-            description = "FUEL GAUGE";
-            description2 = "PUSH R TO RELOAD";
-            break;
-        }
-
-        case EnergyTrainingOverlay:
-        {
-            pointDelta = Point(1.0f, -1.0f);
-            pointA = pointCenter + Point(126.5f, -112.5f);
-            pointB = pointA + (pointDelta * 50.0f);
-            description = "ENERGY GAUGE";
-            break;
-        }
-
-        case AmmoTrainingOverlay:
-        {
-            pointDelta = Point(-1.0f, -1.0f);
-            pointA = pointCenter + Point(-126.5f, -112.5f);
-            pointB = pointA + (pointDelta * 50.0f);
-            description = "AMMUNITION GAUGE";
-            break;
-        }
-
-        case HullTrainingOverlay:
-        {
-            pointDelta = Point(-1.0f, 1.0f);
-            pointA = pointCenter + Point(-65.5f, 35.5f);
-            pointB = pointA + (pointDelta * 100.0f);
-            description = "ARMOR STRENGTH GAUGE";
-            break;
-        }
-
-        case ShieldTrainingOverlay:
-        {
-            pointDelta = Point(1.0f, 1.0f);
-            pointA = pointCenter + Point(65.5f, 35.5f);
-            pointB = pointA + (pointDelta * 100.0f);
-            description = "SHIELD STRENGTH GAUGE";
-            break;
-        }
-
-        case ChatTrainingOverlay:
-        {
-            pointDelta = Point(-1.0f, -1.0f);
-            pointA = pointCenter + Point(-140.0f, -50.0f + (rect.YMax() - pointCenter.Y()));
-            pointB = pointA + (pointDelta * 100.0f);
-            description = "CHAT PANE";
-            break;
-        }
-
-        case SectorTrainingOverlay:
-        {
-            pointDelta = Point(1.0f, 1.0f);
-            pointA = Point(99.0f, 190.0f);
-            pointB = pointA + (pointDelta * 20.0f);
-            description = "SECTOR MAP";
-            break;
-        }
-
-        case InventoryTrainingOverlay:
-        {
-            pointDelta = Point(-1.0f, 1.0f);
-            pointA = Point(rect.XMax() - 150.0f, 265.0f);
-            pointB = pointA + (pointDelta * 50.0f);
-            description = "INVENTORY DISPLAY";
-            break;
-        }
-
-        case TargetTrainingOverlay:
-        {
-            pointDelta = Point(-1.0f, 1.0f);
-            pointA = pointCenter + Point(-70.0f, 120.0f - pointCenter.Y());
-            pointB = pointA + (pointDelta * 100.0f);
-            description = "TARGET HUD";
-            break;
-        }
-
-        case CommandTrainingOverlay:
-        {
-            pointDelta = Point(1.0f, -1.0f);
-            pointA = pointCenter + Point(-(pointCenter.X() + -100.0f), -85.0f + (rect.YMax() - pointCenter.Y()));
-            pointB = pointA + (pointDelta * 50.0f);
-            description = "CURRENT COMMAND";
-            break;
-        }
-
-        case EyeballTrainingOverlay:
-        {
-            pointDelta = Point(1.0f, -1.0f);
-            pointA = pointCenter + Point(140.5f, -140.5f);
-            pointB = pointA + (pointDelta * 50.0f);
-            description = "DETECTION INDICATOR";
-            break;
-        }
-
-        case KillBonusTrainingOverlay:
-        {
-            pointDelta = Point(-1.0f, -0.375f);
-            pointA = pointCenter + Point(-15.0f, -160.5f);
-            pointB = pointA + (pointDelta * 70.0f);
-            description = "KILL BONUS";
-            break;
-        }
-
-        case RollTrainingOverlay:
-        {
-            pointDelta = Point(1.0f, 0.0f);
-            pointA = pointCenter + Point(-110.0f, -170.0f);
-            pointB = pointA + Point(5.0f, 0.0f);
-            description = "PUSH Q AND E TO ROLL LEFT AND RIGHT";
-            description2 = "PUSH V TO TOGGLE MOUSE CONTROL";
-            break;
-        }
-
-        case BoosterTrainingOverlay:
-        {
-            pointDelta = Point(1.0f, 1.0f);
-            pointA = pointCenter + Point(-70.0f, -170.0f);
-            pointB = pointA + Point(5.0f, 0.0f);
-            description = "SPACE TO BOOST";
-            description2 = "";
-            break;
-        }
-
-        case TargetCenterTrainingOverlay:
-        {
-            pointDelta = Point(1.0f, 1.0f);
-            pointA = pointCenter + Point(-144.0f, -170.0f);
-            pointB = pointA + Point(5.0f, 0.0f);
-            description = "CLICK RIGHT MOUSE BUTTON TO TARGET CENTER";
-            description2 = "";
-            break;
-        }
-
-        case FireGunsTrainingOverlay:
-        {
-            pointDelta = Point(1.0f, 1.0f);
-            pointA = pointCenter + Point(-75.0, -170.0f);
-            pointB = pointA + Point(5.0f, 0.0f);
-            description = "LEFT CLICK TO FIRE GUNS";
-            description2 = "";
-            break;
-        }
-
-        case TargetEnemyTrainingOverlay:
-        {
-            pointDelta = Point(1.0f, 1.0f);
-            pointA = pointCenter + Point(-72.0, -170.0f);
-            pointB = pointA + Point(5.0f, 0.0f);
-            description = "PUSH F TO TARGET ENEMY";
-            description2 = "";
-            break;
-        }
-
-        case MissileTrainingOverlay:
-        {
-            pointDelta = Point(1.0f, 1.0f);
-            pointA = pointCenter + Point(-140.0, -170.0f);
-            pointB = pointA + Point(5.0f, 0.0f);
-            description = "PRESS 5 OR MIDDLE CLICK TO FIRE MISSILE";
-            description2 = "";
-            break;
-        }
-
-        case CloakTrainingOverlay:
-        {
-            pointDelta = Point(1.0f, 1.0f);
-            pointA = pointCenter + Point(-75.0, -170.0f);
-            pointB = pointA + Point(5.0f, 0.0f);
-            description = "PUSH G TO TOGGLE CLOAK";
-            description2 = "";
-            break;
-        }
-
-        }
+        pointA = Point(callout.ax, callout.ay);
+        pointB = Point(callout.bx, callout.by);
+        description = callout.description;
+        description2 = callout.secondary;
 
         // begin the ddraw procedure
         pContext->PushState();
@@ -715,20 +448,10 @@ public:
         TRef<IEngineFont> pfont = TrekResources::SmallFont();
 
         pointTextSize = Point::Cast(pfont->GetTextExtent(description));
-        pointC = pointB + Point(pointDelta.X() * pointTextSize.X(), 0.0f);
-        float   fLeft;
-        float   fBottom;
-        if (pointDelta.X() < 0.0f)
-            fLeft = pointC.X();
-        else
-            fLeft = pointB.X();
-
-        if (pointDelta.Y() < 0.0f)
-            fBottom = pointB.Y() + 2.0f;
-        else
-            fBottom = pointB.Y() - (float(pfont->GetHeight()) + 2.0f);
-        pointText = Point(fLeft, fBottom);
-        pointText2 = Point(fLeft, (fBottom - (float(pfont->GetHeight()) + 4.0f)));
+        const auto text = Allegiance::TrainingTextFor(callout, pointTextSize.X(), float(pfont->GetHeight()));
+        pointC = Point(text.cx, text.cy);
+        pointText = Point(text.x, text.y);
+        pointText2 = Point(text.secondaryX, text.secondaryY);
 
         // build the vertex list from the three points
         edgeVertices.SetCount(3);
@@ -746,13 +469,8 @@ public:
         // draw the lines, the description, and the hilite image
         pContext->DrawLines(edgeVertices, edgeIndices);
         pContext->DrawString(pfont, colorLine, pointText, description);
-        if (s_trainingOverlay == RollTrainingOverlay || s_trainingOverlay == FuelTrainingOverlay) {
+        if (*callout.secondary)
             pContext->DrawString(pfont, colorLine, pointText2, description2);
-        }
-        if (s_trainingOverlay == ThrottleTrainingOverlay) {
-            pointText2 = Point((fLeft - 140.0f), (fBottom - (float(pfont->GetHeight()) + 4.0f)));
-            pContext->DrawString(pfont, colorLine, pointText2, description2);
-        }
         pContext->DrawImage(m_psurfaceTrainingOverlay, true, pointA);
 
         // finished drawing

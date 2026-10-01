@@ -1,3 +1,4 @@
+#include "../ClientCore/MouseJoystick.h"
 #include <dinput.h>
 
 #include <regkey.h>
@@ -371,15 +372,7 @@ public:
 
     float CalculateDelta(int delta)
     {
-        if (abs(delta) > m_threshold1 && m_acceleration >= 1) {
-            if (abs(delta) > m_threshold2 && m_acceleration >= 2) {
-                return float(delta) * 4.0f * m_sensitivity;
-            } else {
-                return float(delta) * 2.0f * m_sensitivity;
-            }
-        }
-
-        return float(delta) * m_sensitivity;
+        return Allegiance::MouseDelta(float(delta), m_sensitivity, m_acceleration, float(m_threshold1), float(m_threshold2));
     }
 
     void DeltaPosition(int& dx, int& dy)

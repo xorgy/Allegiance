@@ -2,7 +2,7 @@
 
 #include    "pch.h"
 #include    "AddRespawnAction.h"
-#include    "TrainingMission.h"
+#include    "trainingmission.h"
 
 namespace Training
 {
@@ -25,12 +25,16 @@ namespace Training
     //------------------------------------------------------------------------------
     /* void */  AddRespawnAction::~AddRespawnAction(void)
     {
+        delete m_cda; // owned here until registered with the mission
     }
 
     //------------------------------------------------------------------------------
     void        AddRespawnAction::Execute(void)
     {
-        g_pMission->AddRespawn(m_cda, m_Downtime, m_SpawnGroup, m_SpawnOnAdd);
+        if (m_cda) {
+            g_pMission->AddRespawn(m_cda, m_Downtime, m_SpawnGroup, m_SpawnOnAdd);
+            m_cda = NULL; // mission now owns the respawn action
+        }
     }
 
     //------------------------------------------------------------------------------

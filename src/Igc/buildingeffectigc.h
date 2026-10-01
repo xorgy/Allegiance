@@ -83,21 +83,45 @@ class CbuildingEffectIGC : public TmodelIGC<IbuildingEffectIGC>
 
                 pcluster = pMission->GetCluster(dataBuilding->clusterID);
 
+#ifdef ALLEGIANCE_NATIVE
+                if (!pcluster)
+                    return E_INVALIDARG;
+                // A completed station keeps its visual shell for the shrink
+                // phase, after the authority has consumed the asteroid.
+                if (dataBuilding->asteroidID != NA)
+                {
+                    m_pasteroid = pcluster->GetAsteroid(dataBuilding->asteroidID);
+                    if (!m_pasteroid)
+                        return E_INVALIDARG;
+                    m_pasteroid->SetBuildingEffect(this);
+                }
+#else
                 m_pasteroid = pcluster->GetAsteroid(dataBuilding->asteroidID);
                 assert (m_pasteroid);
                 m_pasteroid->SetBuildingEffect(this);
+#endif
 
                 pcolor = &(dataBuilding->color);
             }
 
+#ifdef ALLEGIANCE_NATIVE
+            m_exportColor = *pcolor;
+            LoadEffect(Color(50.0f/255.0f, 28.0f/255.0f, 146.0f/255.0f),
+                       (c_mtNotPickable | c_mtDamagable | c_mtPredictable) |
+                       (m_pasteroid ? (c_mtCastRay | c_mtHitable) : 0));
+#else
             LoadEffect(Color(50.0f/255.0f, 28.0f/255.0f, 146.0f/255.0f), //*pcolor,
                        (c_mtNotPickable | c_mtCastRay | c_mtHitable | c_mtDamagable | c_mtPredictable));
+#endif
 
             m_radiusMax = 1.1f * (m_radiusAsteroid > m_radiusStation ? m_radiusAsteroid : m_radiusStation);
             SetRadius(1.0f);
             SetPosition(m_positionStart);
 
-            GetHitTest()->SetNoHit(m_pasteroid->GetHitTest());
+#ifdef ALLEGIANCE_NATIVE
+            if (m_pasteroid)
+#endif
+                GetHitTest()->SetNoHit(m_pasteroid->GetHitTest());
 
             assert (GetVelocity().LengthSquared() == 0.0f);
 
@@ -150,8 +174,14 @@ class CbuildingEffectIGC : public TmodelIGC<IbuildingEffectIGC>
                 pdbe->positionStart = m_positionStart;
                 pdbe->positionStop = m_positionStop;
 
+#ifdef ALLEGIANCE_NATIVE
+                // Snapshots also export imported shells and the final fade,
+                // neither of which owns a live constructor.
+                pdbe->color = m_exportColor;
+#else
                 assert (m_pshipBuilder);
                 pdbe->color = m_pshipBuilder->GetSide()->GetColor();
+#endif
             }
 
             return sizeof(DataBuildingEffectExport);
@@ -353,6 +383,9 @@ class CbuildingEffectIGC : public TmodelIGC<IbuildingEffectIGC>
         }
 
     private:
+#ifdef ALLEGIANCE_NATIVE
+        Color                   m_exportColor;
+#endif
         TRef<IshipIGC>           m_pshipBuilder;
         TRef<IasteroidIGC>       m_pasteroid;
         TRef<IstationTypeIGC>    m_pstationType;

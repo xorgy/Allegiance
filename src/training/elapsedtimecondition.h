@@ -14,15 +14,15 @@
 #define _ELAPSED_TIME_CONDITION_H_
 
 #ifndef _PERIODIC_CONDITION_H_
-#include "PeriodicCondition.h"
+#include "periodiccondition.h"
 #endif  //_PERIODIC_CONDITION_H_
 
 #ifndef _N_TIMES_CONDITION_H_
-#include "NTimesCondition.h"
+#include "ntimescondition.h"
 #endif  //_N_TIMES_CONDITION_H_
 
 #ifndef _TRUE_CONDITION_H_
-#include "TrueCondition.h"
+#include "truecondition.h"
 #endif  //_TRUE_CONDITION_H_
 
 namespace Training

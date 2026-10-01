@@ -15,6 +15,7 @@
 
 #ifndef __MAGAZINEIGC_H_
 #define __MAGAZINEIGC_H_
+#include "../ClientCore/EquipmentStatus.h"
 #include "igc.h"
 
 /////////////////////////////////////////////////////////////////////////////
@@ -22,6 +23,11 @@
 class CmagazineIGC : public ImagazineIGC
 {
     public:
+#ifdef ALLEGIANCE_NATIVE
+        uint32_t NativeShots() const {return m_nativeShots;}
+        void NativeRestoreShots(uint32_t shots){m_nativeShots=shots;}
+        uint32_t NativeNextShot(){return ++m_nativeShots;}
+#endif
         CmagazineIGC(void);
         ~CmagazineIGC(void);
 
@@ -161,7 +167,7 @@ class CmagazineIGC : public ImagazineIGC
             }
             else
             {
-                return 1.0f - std::max(0.0f, (m_timeLoaded - Time::Now()) / m_missileType->GetLoadTime());
+                return Allegiance::LauncherArmingFraction(m_timeLoaded - Time::Now(), m_missileType->GetLoadTime());
             }
         }
 
@@ -193,6 +199,9 @@ class CmagazineIGC : public ImagazineIGC
 
         float                           m_mountedFraction;
         float                           m_lock;
+#ifdef ALLEGIANCE_NATIVE
+        uint32_t m_nativeShots{};
+#endif
         Time                            m_timeLoaded;
 
         short                           m_amount;

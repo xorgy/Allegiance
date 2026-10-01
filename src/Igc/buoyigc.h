@@ -92,7 +92,14 @@ class CbuoyIGC : public TmodelIGC<IbuoyIGC>
         }
 
     private:
+#ifdef ALLEGIANCE_NATIVE
+        bool     m_terminating{};
+        // Four command slots per ship can exceed a signed short at native
+        // fleet sizes, even though the number of distinct buoy IDs does not.
+        int      m_nConsumers;
+#else
         short    m_nConsumers;
+#endif
         BuoyID   m_buoyID;
         BuoyType m_type;
         bool     m_visible;

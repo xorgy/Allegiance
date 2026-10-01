@@ -10,21 +10,21 @@
 **  History:
 */
 #include "pch.h"
-#include "Mission8.h"
+#include "mission8.h"
 #include "Training.h"
-#include "GoalList.h"
-#include "ConditionalAction.h"
+#include "goallist.h"
+#include "conditionalaction.h"
 #include "GetShipIsDestroyedCondition.h"
 #include "GetShipHasMountedCondition.h"
 #include "GetShipHasCargoCondition.h"
-#include "FalseCondition.h"
-#include "ElapsedTimeCondition.h"
-#include "SetDisplayModeAction.h"
+#include "falsecondition.h"
+#include "elapsedtimecondition.h"
+#include "setdisplaymodeaction.h"
 #include "CreateDroneAction.h"
-#include "MessageAction.h"
+#include "messageaction.h"
 #include "DoDamageAction.h"
 #include "DoDamageAdjustableAction.h"
-#include "SetCommandAction.h"
+#include "setcommandaction.h"
 #include "notcondition.h"
 #include "orcondition.h"
 #include "andcondition.h"
@@ -37,10 +37,10 @@
 #include "TurnToAction.h"
 #include "objectpointingatcondition.h"
 #include "GetShipIsStoppedCondition.h"
-#include "PlaySoundAction.h"
+#include "playsoundaction.h"
 #include "SetCargoNanAction.h"
-#include "ResetAction.h"
-#include "ResetShipAction.h"
+#include "resetaction.h"
+#include "resetshipaction.h"
 #include "objectwithinradiuscondition.h"
 
 namespace Training
@@ -200,7 +200,7 @@ namespace Training
 		
 		{
 			Goal*	pGoal = new Goal(new ElapsedTimeCondition (3.0f));
-			pStation->ReceiveDamage(c_dmgidNoWarn, 12500.0f, Time::Now(), Vector (-1.0f, 0.0f, 0.0f), Vector (1.0f, 0.0f, 0.0f), 0 );
+			pStation->ReceiveDamage(c_dmgidNoWarn, 12500.0f, Clock::Now (), Vector (-1.0f, 0.0f, 0.0f), Vector (1.0f, 0.0f, 0.0f), 0 );
 			pGoalList->AddGoal(pGoal);
 		}
 

@@ -1,0 +1,25 @@
+--- a/configure
++++ b/configure
+@@ -5563,7 +5563,7 @@
+     DEPCXXFLAGS=$_flags $_cxxflags
+ fi
+ 
+-if VSLANG=1033 $ar 2>&1 | grep -qi Microsoft; then
++if VSLANG=1033 $ar 2>&1 | grep -qi Microsoft || $ar /? 2>&1 | grep -q '^OVERVIEW: LLVM Lib'; then
+     arflags="-nologo"
+     ar_o='-out:$@'
+ elif $ar 2>&1 | grep -q "\[D\] "; then
+--- a/compat/windows/makedef
++++ b/compat/windows/makedef
+@@ -51,7 +51,10 @@
+ 
+ trap 'rm -f -- $libname' EXIT
+ 
+-if [ -n "$AR" ]; then
++if [ -n "$AR" ] && $AR /? 2>&1 | grep -q '^OVERVIEW: LLVM Lib'; then
++    $AR -nologo -out:${libname} "$@" >/dev/null
++    : "${NM:=llvm-nm}"
++elif [ -n "$AR" ]; then
+     $AR rcs ${libname} $@ >/dev/null
+ else
+     machine_flag=""

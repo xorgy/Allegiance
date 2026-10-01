@@ -13,7 +13,9 @@
 #include    "pch.h"
 #include    "GetPickedCondition.h"
 #include    "TypeIDTarget.h"
+#ifndef ALLEGIANCE_NATIVE
 #include    "console.h"
+#endif
 
 namespace Training
 {

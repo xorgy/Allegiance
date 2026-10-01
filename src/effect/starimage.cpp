@@ -1,4 +1,5 @@
 #include "starimage.h"
+#include "../ClientCore/StarField.h"
 
 //////////////////////////////////////////////////////////////////////////////
 //
@@ -88,18 +89,9 @@ public:
                 // fold up the stars for higher density
                 //
 
-                if (vec.z > 0) {
-                    vec.SetX(-vec.X());
-                    vec.SetY(-vec.Y());
-                    vec.SetZ(-vec.Z());
-                }
-
-                //
-                // project the star onto the screen
-                //
-
-                float x = (float)(int)(scale * vec.X() + xc);
-                float y = (float)(int)(yc - scale * vec.Y());
+                auto point = Allegiance::ProjectStar(vec.x, vec.y, vec.z, scale, xc, yc);
+                float x = point.x;
+                float y = point.y;
                 float xold;
                 float yold;
 
@@ -113,11 +105,9 @@ public:
                 }
 
                 if (rect.Inside(Point(x, y))) {
-                    float dx     = fabs(x - xold);
-                    float dy     = fabs(y - yold);
-                    float length = dx + dy;
+                    auto motion = Allegiance::StarMotion({x, y}, {xold, yold});
 
-                    if (length <= 1.0f) {
+                    if (motion.point) {
                         //
                         // Draw a point
                         //
@@ -134,19 +124,10 @@ public:
                         // Draw a line
                         //
 
-                        if (length > 16.0f) {
-                            float scale = 16.0f / length;
-
-                            xold = x + (xold - x) * scale;
-                            yold = y + (yold - y) * scale;
-                        }
-
+                        xold = motion.end.x;
+                        yold = motion.end.y;
                         if (rect.Inside(Point(xold, yold))) {
-                            float alpha  = 1.0f - 0.1f * length;
-
-                            if (alpha < 0.25f) {
-                                alpha = 0.25f;
-                            }
+                            float alpha = motion.brightness;
 
                             pvertex[index * 2].x        = x;
                             pvertex[index * 2].y        = y;

@@ -9,7 +9,15 @@
 **  History:
 */
 
+#ifdef ALLEGIANCE_NATIVE
+#include    "igc.h"
+#include <fstream>
+#include <cmath>
+#include <cstring>
+#include <vector>
+#else
 #include    "pch.h"
+#endif
 #include    "mapmakerigc.h"
 #include    "mappvmaker.h"
 
@@ -76,8 +84,26 @@ ImissionPV::~ImissionPV()
 
 void ImissionPV::Clear()
 {
+#ifdef ALLEGIANCE_NATIVE
+    // Lists store raw pointers. Break both the cluster membership and the
+    // destination reference cycles before releasing the mission's ownership.
+    while (m_pWarps.first())
+    {
+        CwarpPV* warp = m_pWarps.first()->data();
+        warp->SetCluster(NULL);
+        warp->Terminate();
+    }
+    while (m_pClusters.first())
+    {
+        ClusterPVLink* link = m_pClusters.first();
+        CMapPVCluster* cluster = link->data();
+        delete link;
+        cluster->Release();
+    }
+#else
 	m_pClusters.purge(true);
 	m_pWarps.purge(true);
+#endif
 }
 CwarpPV* ImissionPV::GetWarp(WarpID id)
 {
@@ -667,6 +693,9 @@ VOID CmapPVMaker::GenerateRingClusters(CMapPVData * pMapData)
     {
         pCluster = this->GenerateNeutralCluster(pMapData, sID);
         pMapData->SetCluster(sID, pCluster, NA);
+#ifdef ALLEGIANCE_NATIVE
+        pCluster->Release();
+#endif
         sID++;
     }
 }
@@ -2342,6 +2371,40 @@ VOID CmapPVMakerSplitBase::LinkClusters(CMapPVData * pMapData)
 // from IGC file stuff
 const char * CmapPVMakerFromIGCFile::GenerateMission(const char * igcfile,	ImissionPV* pmission)
 {
+#ifdef ALLEGIANCE_NATIVE
+    char filename[MAX_PATH+1]{};
+    if(FAILED(UTL::getFile(igcfile,".igc",filename,true,true)))return "no preview available";
+    std::ifstream input(filename,std::ios::binary|std::ios::ate);if(!input)return "no preview available";
+    auto length=std::streamoff(input.tellg());input.seekg(0);int size{};
+    if(!input.read(reinterpret_cast<char*>(&size),sizeof(size)) || size<=0 || length<std::streamoff(sizeof(size)) || size>length-std::streamoff(sizeof(size)))return "bad custom map file";
+    std::vector<char> bytes(size);if(!input.read(bytes.data(),size))return "bad custom map file";
+    size_t at=0;
+    while(at<bytes.size()){
+        constexpr auto header=sizeof(ObjectType)+sizeof(int);if(bytes.size()-at<header)return "bad custom map file";
+        ObjectType type;int count;std::memcpy(&type,bytes.data()+at,sizeof(type));std::memcpy(&count,bytes.data()+at+sizeof(type),sizeof(count));at+=header;
+        if(count<0 || size_t(count)>bytes.size()-at)return "bad custom map file";
+        const auto* data=bytes.data()+at;
+        if(type==OT_cluster){
+            if(count!=sizeof(DataClusterIGC))return "bad custom map file";DataClusterIGC record;std::memcpy(&record,data,sizeof(record));
+            if(record.clusterID<0 || pmission->GetCluster(record.clusterID) || !std::isfinite(record.screenX) || !std::isfinite(record.screenY))return "invalid sector data";
+            pmission->CreatePVCluster(&record,sizeof(record));
+        }else if(type==OT_warp){
+            if(count!=sizeof(DataWarpIGC))return "bad custom map file";DataWarpIGC record;std::memcpy(&record,data,sizeof(record));auto* cluster=pmission->GetCluster(record.clusterID);
+            if(!cluster || record.warpDef.warpID<0 || pmission->GetWarp(record.warpDef.warpID))return "invalid aleph data";
+            pmission->CreatePVWrap(&record,sizeof(record),cluster);
+        }else if(type==OT_station){
+            if(count!=sizeof(DataStationIGC))return "bad custom map file";DataStationIGC record;std::memcpy(&record,data,sizeof(record));auto* cluster=pmission->GetCluster(record.clusterID);
+            if(!cluster || record.sideID<0 || record.sideID>=c_cSidesMax)return "invalid station data";
+            ++cluster->GetStationsPerSide()[record.sideID];
+        }
+        at+=size_t(count);
+    }
+    if(!pmission->GetClusters()->n())return "invalid sector data";
+    for(auto* link=pmission->GetWarps()->first();link;link=link->next()){
+        auto* warp=link->data();auto* destination=warp->GetDestination();if(!destination || destination==warp || destination->GetDestination()!=warp)return "invalid aleph data";
+    }
+    return nullptr;
+#else
     Modeler* pmodeler = pmission->GetModeler();
 
 	// BT - 10/17 - HighRes Textures
@@ -2424,5 +2487,6 @@ const char * CmapPVMakerFromIGCFile::GenerateMission(const char * igcfile,	Imiss
 	debugf("CmapPVMakerFromIGCFile: %s , %d clusters, %d warps, %d stations\n",igcfile,nbclusters,nbwarps,nbstations);
 	delete [] pData;
 	return sError;
+#endif
 
 }

@@ -10,6 +10,10 @@
 **  History:
 */
 #include    "pch.h"
+#ifdef ALLEGIANCE_NATIVE
+#include <algorithm>
+#include <cstring>
+#endif
 
 #define CUTOFF 16   //Subarrays this size or lower are sorted using shortSort
 
@@ -205,6 +209,19 @@ void Endpoint::shortSort(DataType* lo,
         DataType*   next = p + 1;
         if (comp(p, next) > 0)
         {
+#ifdef ALLEGIANCE_NATIVE
+            // Preserve the original stable insertion, including high-before-
+            // low ties. Newly appended shots may belong far from the end even
+            // when the root selects its "mostly sorted" path. Search a short
+            // local run first, then the sorted prefix instead of walking it.
+            DataType tmp=*next;
+            DataType* insertion=p;int hops=0;
+            while(insertion>lo && hops<8 && comp(insertion-1,&tmp)>0){--insertion;++hops;}
+            if(hops==8 && insertion>lo)
+                insertion=std::upper_bound(lo,insertion,tmp,[](DataType value,DataType element){return comp(&value,&element)<0;});
+            std::memmove(insertion+1,insertion,size_t(next-insertion)*sizeof(DataType));
+            *insertion=tmp;
+#else
             //*p > *next (& therefore either p or next is out of order)
             //Assume it is next and move it to the correct location in the list.
             //Note: we know the list is sorted from lo to p so we could use a binary
@@ -230,6 +247,7 @@ void Endpoint::shortSort(DataType* lo,
             while (t > bp1);
 
             *bp1 = tmp;
+#endif
         }
         p = next;
     }

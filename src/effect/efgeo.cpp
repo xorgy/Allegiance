@@ -1,3 +1,5 @@
+#include "../ClientCore/ParticleEffects.h"
+#include "../ClientCore/SurfaceEffects.h"
 #include "efgeo.h"
 
 #include <engine.h>
@@ -20,7 +22,7 @@ private:
 
     static int  GetCount(float strength, float radius)
     {
-        return 1 + int(strength * radius * radius / 100.0f);
+        return Allegiance::MineParticleCount(strength, radius);
     }
 
 public:
@@ -64,7 +66,7 @@ public:
     void Render(Context* pcontext)
     {
         Vector vecEye = pcontext->TransformLocalToEye(Vector::GetZero());
-        float  bright = bound(100.0f / vecEye.Length(), 0.0f, 1.0f);
+        float  bright = Allegiance::MineBrightness(vecEye.Length());
 
         if (bright > 0) {
             Color  color(bright, bright, bright);
@@ -205,9 +207,10 @@ public:
         //
 
         pcontext->PushState();
-        pcontext->Scale3(1.0f / c_ratio);
-        pcontext->Rotate(Vector(0, 0, 1), m_time / pi);
-        pcontext->Rotate(Vector(0, 1, 0), 0.5f * pi * m_time);
+        const auto motion = Allegiance::BuildShellAnimation(m_time);
+        pcontext->Scale3(motion.innerScale);
+        pcontext->Rotate(Vector(0, 0, 1), motion.innerZ);
+        pcontext->Rotate(Vector(0, 1, 0), motion.innerY);
 
         pcontext->SetGlobalColor(m_colorInner);
         m_psphere->Render(pcontext);
@@ -218,8 +221,8 @@ public:
         // outer sphere
         //
 
-        pcontext->Rotate(Vector(1, 0, 0), m_time);
-        pcontext->Rotate(Vector(0, 1, 0), pi * m_time);
+        pcontext->Rotate(Vector(1, 0, 0), motion.outerX);
+        pcontext->Rotate(Vector(0, 1, 0), motion.outerY);
 
         pcontext->SetBlendMode(BlendModeAdd);
         pcontext->SetGlobalColor(m_colorOuter * m_fOuter);
@@ -680,13 +683,9 @@ public:
         data.m_position = vecPosition;
         data.m_normal   = vecNormal;
 
-        if (vecNormal == Vector(0, 0, 1)) {
-            data.m_forward  = CrossProduct(vecNormal, Vector(0, 1, 0)).Normalize();
-        } else {
-            data.m_forward  = CrossProduct(vecNormal, Vector(0, 0, 1)).Normalize();
-        }
-
-        data.m_right = CrossProduct(data.m_forward, vecNormal);
+        auto axes = Allegiance::HullImpactAxes(vecNormal);
+        data.m_forward = axes.forward;
+        data.m_right = axes.right;
 
         data.m_timeStart = GetTime()->GetValue();
     }
@@ -702,11 +701,7 @@ public:
             Color color(1, 1, 1);
 
             float maxSize = 2.0f;
-            float scale = 0.1f + maxSize * 5.0f * (timeCurrent - data.m_timeStart);
-
-            if (scale > maxSize) {
-                scale = maxSize;
-            }
+            float scale = Allegiance::HullImpactScale(timeCurrent - data.m_timeStart);
 
             //
             // draw the tangent decal
@@ -904,16 +899,7 @@ public:
                 pcontext->GetImageRadius(vecEnd, size)
             );
 
-        int lcount;
-        if (lengthImage > 128) {
-            lcount = 6;
-        } else if (lengthImage > 64) {
-            lcount = 5;
-        } else if (lengthImage > 32) {
-            lcount = 4;
-        } else {
-            lcount = 3;
-        }
+        int lcount = Allegiance::BoltSubdivision(lengthImage);
 
         //
         // color is based on size
@@ -943,27 +929,10 @@ public:
         // sub divide
         //
 
-        pvertex[0].SetPosition(vecStart);
-        pvertex[vcount - 1].SetPosition(vecEnd);
-
-        for (int level = lcount; level > 0 ; level--) {
-            int dbig   = 1 << level;
-            int dsmall = dbig / 2;
-
-            for (index = dsmall; index < vcount; index += dbig) {
-                float angle = random(0, 2 * pi);
-
-                VertexL& vecFirst = pvertex[index - dsmall];
-                VertexL& vecLast  = pvertex[index + dsmall];
-
-                Vector vecMiddle = 0.5f * (vecFirst.GetPosition() + vecLast.GetPosition());
-                Vector vecRandom = size * (cos(angle) * vecUp + sin(angle) * vecRight);
-
-                pvertex[index].SetPosition(vecMiddle + vecRandom);
-            }
-
-            size = size / 2;
-        }
+        Allegiance::SubdivideBolt(vecStart, vecEnd, vecUp, vecRight, size, lcount,
+            [&](int i) { return pvertex[i].GetPosition(); },
+            [&](int i, const Vector& p) { pvertex[i].SetPosition(p); },
+            [](float low, float high) { return random(low, high); });
 
         //
         // draw it

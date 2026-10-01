@@ -14,7 +14,7 @@
 #define _MISSION_NAN_H_
 
 #ifndef _TRAINING_MISSION_H_
-#include "TrainingMission.h"
+#include "trainingmission.h"
 #endif
 
 #ifndef _GOAL_H_

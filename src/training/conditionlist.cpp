@@ -11,7 +11,7 @@
 **  History:
 */
 #include    "pch.h"
-#include    "ConditionList.h"
+#include    "conditionlist.h"
 
 namespace Training
 {

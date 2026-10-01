@@ -11,7 +11,7 @@
 **  History:
 */
 #include    "pch.h"
-#include    "ObjectPointingAtCondition.h"
+#include    "objectpointingatcondition.h"
 #include    "TypeIDTarget.h"
 
 namespace Training
@@ -71,12 +71,17 @@ namespace Training
             Vector  forward = MaskedVector ((*m_pObject)->GetOrientation ().GetForward ()).Normalize ();
             Vector  lookAtTarget = targetPosition - objectPosition;
             float   fDistanceToTarget = lookAtTarget.Length ();
+            // Coincident targets have no direction; they already cover the reticle.
+            if (fDistanceToTarget == 0.0f)
+                return true;
             lookAtTarget /= fDistanceToTarget;
             float   fCosLookAngle = forward * lookAtTarget; // dot product
             if (fCosLookAngle > 0.0f)
             {
                 // here is where we do the comparison against some measurable criteria
-                float   fLookAngle = acosf (fCosLookAngle); // dot product
+                // Normalization can round the dot product slightly above one.
+                // An exactly aligned ship must not stall a lesson with NaN.
+                float   fLookAngle = acosf (fCosLookAngle > 1.0f ? 1.0f : fCosLookAngle);
                 if (m_fMinimumAngle >= 0.0f)
                 {
                     // in this case, I care about a specific angle that I set, so we just
@@ -90,7 +95,8 @@ namespace Training
                     // subtended by the target's radius around the look vector.
                     // this can be confused by long, skinny ships, such as the builder.
                     float   fCoverageRadius = (*m_pTarget)->GetRadius () * 0.75f;
-                    float   fCoverageAngle = asinf (fCoverageRadius / fDistanceToTarget);
+                    float   fCoverageRatio = fCoverageRadius / fDistanceToTarget;
+                    float   fCoverageAngle = asinf (fCoverageRatio > 1.0f ? 1.0f : fCoverageRatio);
                     float   fMinimumCoverageAngle = RadiansFromDegrees (3.0f); // settled on 3 degrees
                     return (fLookAngle < ((fCoverageAngle < fMinimumCoverageAngle) ? fMinimumCoverageAngle : fCoverageAngle)) ? true : false;
                 }

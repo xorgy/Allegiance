@@ -23,6 +23,9 @@
 class   CpartTypeIGC : public IpartTypeIGC
 {
     public:
+#ifdef ALLEGIANCE_NATIVE
+        void NativeSetStaticOwner(ImissionIGC* owner) override { m_pMission = owner; }
+#endif
         CpartTypeIGC(void)
         :
             m_data(NULL)

@@ -10,6 +10,11 @@
 **  History:
 */
 #include "pch.h"
+#ifdef ALLEGIANCE_NATIVE
+#include "../native/object_pool.hpp"
+#include <unordered_map>
+#include <string_view>
+#endif
 
 void    HitTest::SetBB(Time     start,
                        Time     stop,
@@ -101,8 +106,12 @@ void    HitTest::UpdateBB(void)
                 m_boundingBox.axes[i].values[1] = v1 + m_radius;          
             }
 
+#ifndef ALLEGIANCE_NATIVE
             m_endpoints[i][0].value = m_boundingBox.axes[i].values[0];
             m_endpoints[i][1].value = m_boundingBox.axes[i].values[1];
+#endif
+            // Native tree updates extract these values for indexed objects.
+            // Cast-only projectiles need their swept box, never KD endpoints.
         }
     }
 
@@ -205,9 +214,22 @@ void    HitTest::Collide(HitTest*           pHitTest,
     }
 }
 
-class   BoundingPoint : public HitTest
+class   BoundingPoint
+#ifdef ALLEGIANCE_NATIVE
+final
+#endif
+: public HitTest
 {
     public:
+#ifdef ALLEGIANCE_NATIVE
+        static void* operator new(size_t n) {
+            assert(n==sizeof(BoundingPoint));
+            return Native::ObjectPool<sizeof(BoundingPoint),alignof(BoundingPoint)>::allocate();
+        }
+        static void operator delete(void* p) noexcept {
+            Native::ObjectPool<sizeof(BoundingPoint),alignof(BoundingPoint)>::release(p);
+        }
+#endif
         BoundingPoint(IObject*    d, bool staticF)
         :
             HitTest(d, 0.0f, staticF, c_htsPoint)
@@ -296,10 +318,12 @@ class   SingleHull
 
         void* operator new(size_t size, int nVertices, int nAdjacencies)
         {
-            return (void*)(::new char [size +
-                                       sizeof(ConvexVertex) * nVertices +
-                                       sizeof(ConvexVertex*) * (nAdjacencies + nVertices)]);
+            return ::operator new(size + sizeof(ConvexVertex) * nVertices +
+                                  sizeof(ConvexVertex*) * (nAdjacencies + nVertices));
         }
+
+        void operator delete(void* p) noexcept { ::operator delete(p); }
+        void operator delete(void* p, int, int) noexcept { ::operator delete(p); }
 
         const ConvexVertex*   GetExtremeVertex(const Vector& direction) const
         {
@@ -402,9 +426,11 @@ class   MultiHull : public MultiHullBase
 
         void* operator new(size_t size, int nHulls)
         {
-            return (void*)(::new char [size +
-                                       sizeof(SingleHull*) * nHulls]);
+            return ::operator new(size + sizeof(SingleHull*) * nHulls);
         }
+
+        void operator delete(void* p) noexcept { ::operator delete(p); }
+        void operator delete(void* p, int) noexcept { ::operator delete(p); }
 
         int             GetNhulls(void) const
         {
@@ -449,9 +475,11 @@ class   BoundingHull : public HitTest
 
         void* operator new(size_t size, const MultiHull* pMultiHull)
         {
-            return (void*)(::new char [size +
-                                       sizeof(ConvexVertex*) * pMultiHull->GetNhulls()]);
+            return ::operator new(size + sizeof(ConvexVertex*) * pMultiHull->GetNhulls());
         }
+
+        void operator delete(void* p) noexcept { ::operator delete(p); }
+        void operator delete(void* p, const MultiHull*) noexcept { ::operator delete(p); }
 
         virtual void    UpdateStaticBB(void)
         {
@@ -491,7 +519,9 @@ class   BoundingHull : public HitTest
             return extreme;
         }
 
+#ifndef ALLEGIANCE_NATIVE
         #pragma optimize ("p", on)
+#endif
         Vector  GetHullExtreme(int  hullID, const Vector&  direction)
         {
             assert (hullID >= 0);
@@ -547,7 +577,9 @@ class   BoundingHull : public HitTest
                 }
             }
         }
+#ifndef ALLEGIANCE_NATIVE
         #pragma optimize ("", on)
+#endif
 
         virtual void            SetShape(HitTestShape   shape)
         {
@@ -635,6 +667,27 @@ typedef Slist_utl<CachedMultiHull> CachedList;
 typedef Slink_utl<CachedMultiHull> CachedLink;
 
 CachedList  cachedMultiHulls;
+#ifdef ALLEGIANCE_NATIVE
+// The legacy list retains ownership. Native callers use an allocation-free,
+// case-insensitive lookup, including cached misses, instead of walking every
+// preloaded convex hull on each drop or hull replacement.
+struct HullNameHash {
+    size_t operator()(std::string_view name)const {
+        size_t hash=1469598103934665603ull;
+        for(unsigned char c:name){if(c>='A' && c<='Z')c+='a'-'A';hash=(hash^c)*1099511628211ull;}
+        return hash;
+    }
+};
+struct HullNameEqual {
+    bool operator()(std::string_view a,std::string_view b)const {
+        if(a.size()!=b.size())return false;
+        for(size_t i=0;i<a.size();++i){auto x=static_cast<unsigned char>(a[i]),y=static_cast<unsigned char>(b[i]);
+            if(x>='A' && x<='Z')x+='a'-'A';if(y>='A' && y<='Z')y+='a'-'A';if(x!=y)return false;}
+        return true;
+    }
+};
+std::unordered_map<std::string_view,MultiHull*,HullNameHash,HullNameEqual> nativeHullCache;
+#endif
 
 MultiHullBase*  HitTest::Load(const char*    pszFileName)
 {
@@ -646,6 +699,9 @@ MultiHullBase*  HitTest::Load(const char*    pszFileName)
     //Does the name exist in the cache?
     //It could exist but be a non-existant hull
     bool    bFound = false;
+#ifdef ALLEGIANCE_NATIVE
+    if(auto cached=nativeHullCache.find(std::string_view(pszFileName));cached!=nativeHullCache.end())return cached->second;
+#else
     {
         for (CachedLink* pcl = cachedMultiHulls.first();
              (pcl != NULL);
@@ -660,6 +716,7 @@ MultiHullBase*  HitTest::Load(const char*    pszFileName)
             }
         }
     }
+#endif
 
     if (!bFound)
     {
@@ -778,7 +835,9 @@ MultiHullBase*  HitTest::Load(const char*    pszFileName)
 
                     assert (strlen(line) > 0);
                     assert (strlen(line) < c_cbFrameName);
-                    line[strlen(line) - 1] = '\0';      //Trim off the \n
+                    // Windows text mode used to consume CRLF for us. Keep frame
+                    // names identical on native hosts (also accept an EOF line).
+                    line[strcspn(line, "\r\n")] = '\0';
                     strcpy(pfd->szName, line);
 
                     ZVerify(fgets(line, c_maxLine, fileIn));
@@ -818,6 +877,10 @@ MultiHullBase*  HitTest::Load(const char*    pszFileName)
 
             //Put it at the front of the list (since we might read another one in real soon).
             cachedMultiHulls.first(pcl);
+#ifdef ALLEGIANCE_NATIVE
+            // The cache node owns this stable name for the cache lifetime.
+            nativeHullCache.emplace(std::string_view(cmh.m_name),pMultiHull);
+#endif
         }
     }
 

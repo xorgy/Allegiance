@@ -6,19 +6,19 @@
 **      Cloned mission 6 without intro and with less constraints.
 */
 #include    "pch.h"
-#include    "Mission10.h"
+#include    "mission10.h"
 
 #include    "Training.h"
-#include    "GoalList.h"
-#include    "ConditionalAction.h"
+#include    "goallist.h"
+#include    "conditionalaction.h"
 #include    "GetShipIsDestroyedCondition.h"
-#include    "FalseCondition.h"
-#include    "ElapsedTimeCondition.h"
-#include    "SetDisplayModeAction.h"
+#include    "falsecondition.h"
+#include    "elapsedtimecondition.h"
+#include    "setdisplaymodeaction.h"
 #include    "CreateDroneAction.h"
-#include    "MessageAction.h"
+#include    "messageaction.h"
 #include    "CreateWaypointAction.h"
-#include    "SetCommandAction.h"
+#include    "setcommandaction.h"
 #include    "AddRespawnAction.h"
 #include    "KillsReachedCondition.h"
 #include    "ModifyCreateDroneActionAction.h"
@@ -277,8 +277,11 @@ namespace Training
 
             ImodelIGC* buoy = (ImodelIGC*)pMission->CreateObject(pMission->GetLastUpdate(), OT_buoy, &buoyData, sizeof(buoyData));
 
-            pShip->SetCommand(c_cmdAccepted, buoy, c_cidGoto);
-            orderSet = true;
+            if (buoy) {
+                pShip->SetCommand(c_cmdAccepted, buoy, c_cidGoto);
+                buoy->Release();
+                orderSet = true;
+            }
         }
 
         return orderSet; //always true
@@ -658,12 +661,10 @@ namespace Training
         {
             Goal*               pGoal = new Goal(new KillsReachedCondition(16));
 
-            ModifyCreateDroneActionAction* pMod1 = new ModifyCreateDroneActionAction(pCreateEnemy2Action);
             ModifyCreateDroneActionAction* pMod2 = new ModifyCreateDroneActionAction(pCreateEnemy2Action);
             pMod2->ModifyCreatedTechLevel(2);
             pMod2->ModifyCreatedHullType(314); //314 == Bios Enh Fighter
             pMod2->ModifyCreatedName("Enemy Enh Fighter");
-            pMod1->ModifyCreatedBehaviour(c_wbbmInRangeAggressive | c_wbbmUseMissiles | c_wbbmStrafe | c_wbbmRunAt60Hull);
             pMod2->ModifyCreatedBehaviour(c_wbbmInRangeAggressive | c_wbbmUseMissiles | c_wbbmRunAt30Hull);
             
             pGoal->AddStartAction(pMod2);

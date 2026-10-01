@@ -15,30 +15,30 @@
 
 #include    "Training.h"
 #include    "Goal.h"
-#include    "GoalList.h"
+#include    "goallist.h"
 #include    "Predicate.h"
-#include    "TrueCondition.h"
-#include    "FalseCondition.h"
-#include    "AndCondition.h"
-#include    "OrCondition.h"
-#include    "NotCondition.h"
-#include    "ElapsedTimeCondition.h"
-#include    "ObjectMovingTowardsCondition.h"
-#include    "ObjectWithinRadiusCondition.h"
-#include    "ObjectPointingAtCondition.h"
-#include    "ConditionalAction.h"
-#include    "ConditionList.h"
-#include    "ActionList.h"
-#include    "MessageAction.h"
-#include    "PlaySoundAction.h"
-#include    "SetCommandAction.h"
-#include    "NoAction.h"
-#include    "NTimesCondition.h"
-#include    "EndMissionAction.h"
-#include    "ResetAction.h"
-#include    "ResetShipAction.h"
-#include    "SoundFinishedCondition.h"
-#include    "SetDisplayModeAction.h"
+#include    "truecondition.h"
+#include    "falsecondition.h"
+#include    "andcondition.h"
+#include    "orcondition.h"
+#include    "notcondition.h"
+#include    "elapsedtimecondition.h"
+#include    "objectmovingtowardscondition.h"
+#include    "objectwithinradiuscondition.h"
+#include    "objectpointingatcondition.h"
+#include    "conditionalaction.h"
+#include    "conditionlist.h"
+#include    "actionlist.h"
+#include    "messageaction.h"
+#include    "playsoundaction.h"
+#include    "setcommandaction.h"
+#include    "noaction.h"
+#include    "ntimescondition.h"
+#include    "endmissionaction.h"
+#include    "resetaction.h"
+#include    "resetshipaction.h"
+#include    "soundfinishedcondition.h"
+#include    "setdisplaymodeaction.h"
 #include    "TurnShipAboutCondition.h"
 #include    "GetRadarLODCondition.h"
 #include    "SetRadarLODAction.h"
@@ -992,6 +992,10 @@ namespace Training
             pGoalList->AddGoal (pGoal);
         }
 
+        // Acknowledge the escort order while the constructor still exists.
+        // Completing construction removes it and clears orders that target it.
+        pGoalList->AddGoal (new Goal (new GetCommandCondition (trekClient.GetShip (), c_cidGoto)));
+
         // (Wait for building to complete)
         {
             Goal*   pGoal = new Goal(new GetShipIsDestroyedCondition2(OT_ship, m_builderID));
@@ -999,9 +1003,6 @@ namespace Training
             pGoal->AddStartAction(new SetCommandAction(m_builderID, c_cmdAccepted, OT_asteroid, static_cast<ObjectID>(10332), c_cidBuild));
             pGoalList->AddGoal(pGoal);
         }
-
-        // (Wait for command acceptance)
-        pGoalList->AddGoal (new Goal (new GetCommandCondition (trekClient.GetShip (), c_cidGoto)));
 
         // wait a few seconds
         {

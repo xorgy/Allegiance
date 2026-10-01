@@ -22,6 +22,9 @@
 class CchaffTypeIGC : public IchaffTypeIGC
 {
     public:
+#ifdef ALLEGIANCE_NATIVE
+        void NativeSetStaticOwner(ImissionIGC* owner) override { m_pMission = owner; }
+#endif
         CchaffTypeIGC(void)
         {
         }

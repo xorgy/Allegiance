@@ -11,8 +11,8 @@
 **  History:
 */
 #include    "pch.h"
-#include    "TrainingMission.h"
-#include    "MessageAction.h"
+#include    "trainingmission.h"
+#include    "messageaction.h"
 
 namespace Training
 {

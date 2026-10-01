@@ -1,4 +1,5 @@
 #include "pch.h"
+#include "../ClientCore/ClientSoundEvents.h"
 #include    <limits.h>
 
 //
@@ -671,10 +672,10 @@ HRESULT BaseClient::HandleMsg(FEDMESSAGE* pfm,
                     station->GetCluster()->GetName()
                     );
 
-                if (pfmStationCapture->sidOld == GetSideID() || GetSide()->AlliedSides(GetCore()->GetSide(pfmStationCapture->sidOld),GetSide()))  //ALLY Rock/Imago 7/27/09
-                    PlaySoundEffect(station->GetStationType()->GetCapturedSound());
-                else if (pfmStationCapture->sidNew == GetSideID() || GetSide()->AlliedSides(GetCore()->GetSide(pfmStationCapture->sidNew),GetSide())) //ALLY Rock/Imago 7/27/09
-                    PlaySoundEffect(station->GetStationType()->GetEnemyCapturedSound());
+                SoundID sound = Allegiance::StationCaptureSound(station->GetStationType(),
+                    pfmStationCapture->sidOld == GetSideID() || GetSide()->AlliedSides(GetCore()->GetSide(pfmStationCapture->sidOld), GetSide()),
+                    pfmStationCapture->sidNew == GetSideID() || GetSide()->AlliedSides(GetCore()->GetSide(pfmStationCapture->sidNew), GetSide()));
+                if (sound != NA) PlaySoundEffect(sound);
 
                 station->SetSide(psideNew);
             }

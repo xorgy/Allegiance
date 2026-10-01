@@ -21,6 +21,9 @@ CmissileIGC::CmissileIGC(void)
     m_launcher(NULL),
     m_target(NULL),
     m_missileType(NULL)
+#ifdef ALLEGIANCE_NATIVE
+    ,m_tImpact(0),m_missileID(NA) // Untargeted missiles have no intercept estimate to export.
+#endif
 {
 }
 
@@ -85,6 +88,12 @@ HRESULT CmissileIGC::Initialize(ImissionIGC* pMission, Time now, const void* dat
         }
 
         m_launcher = dataMissile->pLauncher;
+#ifdef ALLEGIANCE_NATIVE
+        // A visible replica missile need not disclose its hidden launcher.
+        assert(m_launcher || pMission->GetIgcSite()->NativePredictionMode()>=2);
+        if(m_launcher)
+#endif
+        {
         assert (m_launcher);
         m_launcher->AddRef();
         {
@@ -101,6 +110,7 @@ HRESULT CmissileIGC::Initialize(ImissionIGC* pMission, Time now, const void* dat
         }
         m_launcher->SetLastMissileFired(this);
 
+        }
         m_timeActivate = now + dataMissileType->readyTime;
 
         SetCluster(dataMissile->pCluster);
@@ -124,6 +134,9 @@ HRESULT CmissileIGC::Initialize(ImissionIGC* pMission, Time now, const void* dat
         m_lock = dataMissile->lock;
 
         m_missileID = dataMissile->missileID;
+#ifdef ALLEGIANCE_NATIVE
+        GetMyMission()->NativeAddMissile(this);
+#endif
 
         m_bDisarmed = dataMissile->bDud;
 
@@ -136,6 +149,9 @@ HRESULT CmissileIGC::Initialize(ImissionIGC* pMission, Time now, const void* dat
 void    CmissileIGC::Terminate(void)
 {
     AddRef();
+#ifdef ALLEGIANCE_NATIVE
+    GetMyMission()->NativeDeleteMissile(this);
+#endif
 
 	TmodelIGC<ImissileIGC>::Terminate();
 

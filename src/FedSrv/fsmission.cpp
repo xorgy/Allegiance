@@ -9,6 +9,13 @@
  *-----------------------------------------------------------------------*/
 
 #include "pch.h"
+#include "../ClientCore/MissionBase.h"
+#include "../ClientCore/MissionRules.h"
+#include "../ClientCore/PlayerEconomy.h"
+#include "../ClientCore/Alliances.h"
+#include "../ClientCore/LobbyReady.h"
+#include "../ClientCore/StationEvacuation.h"
+#include "../ClientCore/SideElimination.h"
 
 using json = nlohmann::json;
 
@@ -1103,18 +1110,13 @@ void CFSMission::RemovePlayerFromSide(CFSPlayer * pfsPlayer, QuitSideReason reas
   if (STAGE_STARTED == m_misdef.stage || STAGE_STARTING == m_misdef.stage)
   {
     //The player was on a side and the game was going
-    if (pfsNewLeader && (pfsNewLeader->GetIGCShip()->GetAutoDonate() == pshipPlayer))
-        pfsNewLeader->SetAutoDonate(NULL, 0, false);
-
-    //Anyone who was autodonating to this player is no longer autodonating to this player
-    for (ShipLinkIGC*   psl = psideOld->GetShips()->first(); (psl != NULL); psl = psl->next())
-    {
-        if ((psl->data()->GetAutoDonate() == pshipPlayer) &&
-            ((pfsNewLeader == NULL) || (psl->data() != pfsNewLeader->GetIGCShip())))
-        {
-            ((CFSShip*)(psl->data()->GetPrivateData()))->GetPlayer()->SetAutoDonate(pfsNewLeader, 0, false);
-        }
-    }
+    Allegiance::RedirectDepartingDonations(psideOld->GetShips(), pshipPlayer,
+        pfsNewLeader ? pfsNewLeader->GetIGCShip() : NULL,
+        [](IshipIGC* donor, IshipIGC* recipient) {
+            ((CFSShip*)(donor->GetPrivateData()))->GetPlayer()->SetAutoDonate(
+                recipient ? ((CFSShip*)(recipient->GetPrivateData()))->GetPlayer() : NULL,
+                0, false);
+        });
 
     g.fm.SendMessages(CFSSide::FromIGC(psideOld)->GetGroup(), FM_GUARANTEED, FM_FLUSH);
 
@@ -1421,29 +1423,13 @@ int CFSMission::GetRankThreshold()
  */
 bool CFSMission::HasPlayers(IsideIGC * pside, bool bCountGhosts)
 {
-  const ShipListIGC * plistShip = pside ? pside->GetShips() : m_pMission->GetShips();
-  for (ShipLinkIGC * plinkShip = plistShip->first(); plinkShip; plinkShip = plinkShip->next())
-  {
-    if (ISPLAYER(plinkShip->data()) && (bCountGhosts || !plinkShip->data()->IsGhost()))
-      return true;
-  }
-  return false;
+  return Allegiance::MissionHasPlayers(m_pMission, pside, bCountGhosts,
+      [](IshipIGC* ship) { return ISPLAYER(ship); });
 }
 
 IstationIGC * CFSMission::GetBase(IsideIGC * pside)
 {
-  if (pside)
-  {
-    for (StationLinkIGC*    psl = pside->GetStations()->first(); (psl != NULL); psl = psl->next())
-    {
-        IstationIGC*    pstation = psl->data();
-
-        if (pstation->GetStationType()->HasCapability(c_sabmRestart))
-            return pstation;
-    }
-  }
-
-  return NULL;
+    return Allegiance::MissionRestartBase(pside, c_sabmRestart);
 }
 
 //
@@ -2298,7 +2284,7 @@ void CFSMission::DoPayday(IsideIGC* pside)
     int np = GetCountOfPlayers(pside, true);
     if (np != 0)
     {
-        int delta = m_rgMoney[sideID] / np;
+        int delta = Allegiance::PaydayShare(m_rgMoney[sideID], np);
         if (delta > 0)
         {
             BEGIN_PFM_CREATE(g.fm, pfmPayday, S, PAYDAY)
@@ -2308,19 +2294,12 @@ void CFSMission::DoPayday(IsideIGC* pside)
 
             m_rgMoney[sideID] -= delta * np;
 
-            const ShipListIGC * plistShip = pside->GetShips();
-            for(ShipLinkIGC * plinkShip = plistShip->first(); plinkShip; plinkShip = plinkShip->next())
-            {
-                CFSShip * pfsShip = (CFSShip *) plinkShip->data()->GetPrivateData();
-                if (pfsShip->IsPlayer())
-                {
-                    CFSPlayer*  pfsDonate = pfsShip->GetPlayer()->GetAutoDonate();
-                    if (pfsDonate)
-                        pfsDonate->SetMoney(pfsDonate->GetMoney() + delta);
-                    else
-                        pfsShip->SetMoney(pfsShip->GetMoney() + delta);
-                }
-            }
+            Allegiance::CreditPayday(pside->GetShips(), Money(delta),
+                [](IshipIGC* ship) { return ((CFSShip*)(ship->GetPrivateData()))->IsPlayer(); },
+                [](IshipIGC* ship, Money amount) {
+                    CFSShip* account = (CFSShip*)(ship->GetPrivateData());
+                    account->SetMoney(account->GetMoney() + amount);
+                });
         }
     }
 }
@@ -2339,157 +2318,9 @@ void CFSMission::DoTick(Time timeNow)
             if ((timeNow - pmp->timeStart) > pmp->GetCountDownTime())
             {
                 //End the game ... side with the most kills wins (ties -> fewest deaths, ties -> most money)
-                IsideIGC*   psideWin = NULL;
-
-                const char* pszClue;
-
-                if (pmp->IsConquestGame())
-                {
-                    pszClue = "conquest";
-
-                    int maxFlags = 0;
-                    for (SideLinkIGC*   psl = pm->GetSides()->first(); (psl != NULL); psl = psl->next())
-                    {
-                        IsideIGC*   pside = psl->data();
-                        int nFlags = 0;
-                        for (StationLinkIGC*    l = pside->GetStations()->first(); (l != NULL); l = l->next())
-                        {
-                            if (l->data()->GetBaseStationType()->HasCapability(c_sabmFlag))
-                                nFlags++;
-                        }
-
-                        if (nFlags > maxFlags)
-                        {
-                            maxFlags = nFlags;
-                            psideWin = pside;
-                        }
-                        else if (nFlags == maxFlags)
-                        {
-                            psideWin = NULL;
-                        }
-                    }
-                }
-
-                if ((psideWin == NULL) && pmp->IsTerritoryGame())
-                {
-                    pszClue = "territory";
-
-                    unsigned char maxSectors = 0;
-                    for (SideLinkIGC*   psl = pm->GetSides()->first(); (psl != NULL); psl = psl->next())
-                    {
-                        IsideIGC*   pside = psl->data();
-                        int nSectors = pside->GetTerritoryCount();
-
-                        if (nSectors > maxSectors)
-                        {
-                            maxSectors = nSectors;
-                            psideWin = pside;
-                        }
-                        else if (nSectors == maxSectors)
-                        {
-                            psideWin = NULL;
-                        }
-                    }
-                }
-
-                if ((psideWin == NULL) && pmp->IsProsperityGame())
-                {
-                    pszClue = "prosperity";
-
-                    DWORD maxTime = 0;
-                    for (SideLinkIGC*   psl = pm->GetSides()->first(); (psl != NULL); psl = psl->next())
-                    {
-                        IsideIGC*   pside = psl->data();
-
-                        IbucketIGC* pbucket = pside->GetBuckets()->last()->data();
-                        assert ((pbucket->GetBucketType() == OT_development) &&
-                                (pbucket->GetBuyable()->GetObjectID() == c_didTeamMoney));
-
-                        DWORD   time = pbucket->GetTime();
-
-                        if (time > maxTime)
-                        {
-                            maxTime = time;
-                            psideWin = pside;
-                        }
-                        else if (time == maxTime)
-                        {
-                            psideWin = NULL;
-                        }
-                    }
-                }
-
-                if ((psideWin == NULL) && pmp->IsArtifactsGame())
-                {
-                    pszClue = "artifacts";
-
-                    short   maxFlags = 0;
-                    for (SideLinkIGC*   psl = pm->GetSides()->first(); (psl != NULL); psl = psl->next())
-                    {
-                        IsideIGC*   pside = psl->data();
-
-                        short   nFlags = pside->GetArtifacts();
-
-                        if (nFlags > maxFlags)
-                        {
-                            maxFlags = nFlags;
-                            psideWin = pside;
-                        }
-                        else if (nFlags == maxFlags)
-                        {
-                            psideWin = NULL;
-                        }
-                    }
-                }
-
-                if ((psideWin == NULL) && pmp->IsFlagsGame())
-                {
-                    pszClue = "flags";
-
-                    short   maxFlags = 0;
-                    for (SideLinkIGC*   psl = pm->GetSides()->first(); (psl != NULL); psl = psl->next())
-                    {
-                        IsideIGC*   pside = psl->data();
-
-                        short   nFlags = pside->GetFlags();
-
-                        if (nFlags > maxFlags)
-                        {
-                            maxFlags = nFlags;
-                            psideWin = pside;
-                        }
-                        else if (nFlags == maxFlags)
-                        {
-                            psideWin = NULL;
-                        }
-                    }
-                }
-
-                if (psideWin == NULL)
-                {
-                    pszClue = "kills";
-
-                    int     nKills = -1;
-                    int     nDeaths = INT_MAX;
-                    for (SideLinkIGC*   psl = pm->GetSides()->first(); (psl != NULL); psl = psl->next())
-                    {
-                        IsideIGC*   pside = psl->data();
-                        int         k = pside->GetKills();
-                        int         d = pside->GetDeaths();
-
-                        if ((k > nKills) ||
-                            ((k == nKills) && (d < nDeaths)))
-                        {
-                            nKills = k;
-                            nDeaths = d;
-                            psideWin = pside;
-                        }
-                        else if ((k == nKills) && (d == nDeaths))
-                        {
-                            psideWin = NULL;
-                        }
-                    }
-                }
+                auto victory = Allegiance::CheckTimedVictory(pm);
+                IsideIGC* psideWin = victory.winner;
+                const char* pszClue = victory.reason;
 
                 if (psideWin)
                 {
@@ -3577,106 +3408,10 @@ IsideIGC*   CFSMission::CheckForVictoryByStationKill(IstationIGC* pstationKilled
     const SideListIGC*  psides = m_pMission->GetSides();
 
 
-    bool                 bChange = false;
-    if (pmp->IsConquestGame())
-    {
-
-        int nStationsTotal = 0;
-        assert (c_cSidesMax == 6);
-        int nStationsPerSide[c_cSidesMax] = {0, 0, 0, 0, 0, 0};
-
-        {
-            for (StationLinkIGC*    psl = m_pMission->GetStations()->first();
-                 (psl != NULL);
-                 psl = psl->next())
-            {
-                IstationIGC*    pstation = psl->data();
-                if ((pstation != pstationKilled) && pstation->GetBaseStationType()->HasCapability(c_sabmFlag))
-                {
-                    nStationsTotal++;
-                    nStationsPerSide[pstation->GetSide()->GetObjectID()]++;
-                }
-            }
-        }
-
-		// KGJV #62 count active teams
-		int nActiveTeams = 0;
-
-        if (nStationsTotal != 0)
-        {
-            const SideListIGC*  psides = m_pMission->GetSides();
-			
-
-            for (SideLinkIGC* l = psides->first(); (l != NULL); l = l->next())
-            {
-                IsideIGC*       pside = l->data();
-				// KGJV #62 count active team
-				if (pside->GetActiveF()) nActiveTeams++;
-				if (pside->GetAllies() != NA) bAllies = true;
-
-                unsigned char   conquest = (unsigned char)(100 * nStationsPerSide[pside->GetObjectID()] / nStationsTotal);
-
-                if (conquest != pside->GetConquestPercent())
-                {
-                    bChange = true;
-                    pside->SetConquestPercent(conquest);
-
-                    if (conquest >= pmp->iGoalConquestPercentage)
-                        psideWon = pside;
-                }
-            }
-			// KGJV #62 - no winner if bAllowEmptyTeam and one active team is left - Imago: allies overrides to prevent "issues"?
-			if (pmp->bAllowEmptyTeams && (nActiveTeams == 1))
-				psideWon = NULL;
-        }
-    }
-
-    if (pmp->IsTerritoryGame() && (psideWon == NULL))
-	{
-        assert (c_cSidesMax == 6);
-        unsigned char nTerritoriesPerSide[c_cSidesMax] = {0, 0, 0, 0, 0, 0};
-
-        const ClusterListIGC*   pclusters = m_pMission->GetClusters();
-
-        for (ClusterLinkIGC*    pcl = pclusters->first(); (pcl != NULL); pcl = pcl->next())
-        {
-            IclusterIGC*    pcluster = pcl->data();
-
-            IsideIGC*       psideOwner = NULL;
-            StationLinkIGC*    psl;
-            for (psl = pcluster->GetStations()->first(); (psl != NULL); psl = psl->next())
-            {
-                if (psl->data() != pstationKilled)
-                {
-                    IsideIGC*   pside = psl->data()->GetSide();
-                    if (psideOwner == NULL)
-                        psideOwner = pside;
-                    else if (psideOwner != pside)
-                        break;
-                }
-            }
-
-            if (psideOwner && (psl == NULL))
-                nTerritoriesPerSide[psideOwner->GetObjectID()]++;
-        }
-
-        unsigned char nThreashold = (unsigned char)((50 + pclusters->n() * pmp->iGoalTerritoryPercentage) / 100);
-
-        for (SideLinkIGC* l = psides->first(); (l != NULL); l = l->next())
-        {
-            IsideIGC*       pside = l->data();
-            SideID          sideID = pside->GetObjectID();
-
-            if (nTerritoriesPerSide[sideID] != pside->GetTerritoryCount())
-            {
-                bChange = true;
-                pside->SetTerritoryCount(nTerritoriesPerSide[sideID]);
-
-                if (nTerritoriesPerSide[sideID] >= nThreashold)
-                    psideWon = pside;
-            }
-        }
-    }
+    const auto victory = Allegiance::CheckStationVictory(m_pMission, pstationKilled, psideOld);
+    const bool bChange = victory.changed;
+    psideWon = victory.winner;
+    bAllies = victory.alliances;
 
     //Broadcast the victory rankings to all sides
     if (bChange)
@@ -3695,52 +3430,14 @@ IsideIGC*   CFSMission::CheckForVictoryByStationKill(IstationIGC* pstationKilled
         g.fm.SendMessages(GetGroupRealSides(), FM_GUARANTEED, FM_FLUSH);
     }
 
-    //Elimiation of all restart stations of all other sides is always a win
-    if ((psideWon == NULL) && psideOld)
-    {
-        StationLinkIGC*    psl;
-        for (psl = psideOld->GetStations()->first();
-             (psl != NULL);
-             psl = psl->next())
-        {
-            IstationIGC* pstation = psl->data();
-            if ((pstation != pstationKilled) && pstation->GetStationType()->HasCapability(c_sabmRestart))
-                break;
-        }
-        if (psl == NULL)
-        {
-            //NYI last station gone ... need to deactivate side
-            DeactivateSide(psideOld);
-        }
-    }
+    // Player/drone removal and its notifications remain server responsibilities.
+    if (victory.eliminated)
+        DeactivateSide(victory.eliminated);
   }
 
-
-  if (bAllies) { //Imago 7/21/09
-	bool bAllAllies = true;
-	IsideIGC*   allywinside = NULL;
-	//lets get a list of allied sideIDs  Imago ALLY 7/17/09
-	for (SideLinkIGC* psidelink = m_pMission->GetSides()->first();
-		(psidelink != NULL);
-		psidelink = psidelink->next())
-	{
-		IsideIGC* otherside = psidelink->data();
-		//the only active sides are all allied...game is over.
-		if (!otherside->GetActiveF()) continue;
-		for (SideLinkIGC* psl = m_pMission->GetSides()->first();
-			(psl != NULL);
-			psl = psl->next())
-		{
-			IsideIGC*   thisside = psl->data();
-			if (!thisside->GetActiveF()) continue;
-			if (!thisside->AlliedSides(otherside,thisside) && otherside != thisside)
-				bAllAllies = false;
-			else 
-				allywinside = thisside;
-		}
-	}
-	psideWon = (bAllAllies) ? allywinside : psideWon;
-  }
+  if (bAllies)
+      if (IsideIGC* survivor = Allegiance::AlliedSurvivor(m_pMission))
+          psideWon = survivor;
 
 
   return psideWon;
@@ -3750,14 +3447,7 @@ IsideIGC*   CFSMission::CheckForVictoryByKills(IsideIGC*    psideTest)
 {
   if ((STAGE_STARTED == GetStage()) && (m_psideWon == NULL))
   {
-    const MissionParams* pmp = m_pMission->GetMissionParams();
-    if (pmp->IsDeathMatchGame())
-    {
-        if (psideTest->GetKills() >= pmp->nGoalTeamKills)
-        {
-            return psideTest;
-        }
-    }
+    return Allegiance::CheckKillVictory(psideTest);
   }
 
   return NULL;
@@ -4783,70 +4473,11 @@ void CFSMission::RequestPosition(CFSPlayer * pfsPlayer, IsideIGC * pside, bool b
 void CFSMission::VacateStation(IstationIGC * pstation)
 {
     assert (pstation->GetMission() == m_pMission);
-
-    IsideIGC*   psideGhost = NULL;
-
-    //Everyone goes (in the event of a capture: the person capturing has not docked yet)
-    const ShipListIGC*  pships = pstation->GetShips();
-    ShipLinkIGC*        pshiplink = pships->first();
-    while (pshiplink)
-    {
-        IshipIGC*   pship = pshiplink->data();
-        if (pship->GetParentShip() == NULL)
-        {
-            if (pship->IsGhost())
-            {
-                //Ghosts ... move the ghosts in the next pass
-                psideGhost = pship->GetSide();
-                pshiplink = pshiplink->next();
-            }
-            else
-            {
-                //Force any kids who haven't undocked to undock
-                for (ShipLinkIGC*   psl = pship->GetChildShips()->first();
-                   (psl != NULL);
-                   psl = psl->next())
-                {
-                  psl->data()->SetStation(NULL);
-                }
-
-                pship->SetStation(NULL);
-
-                CFSShip*    pfsship = (CFSShip*)(pship->GetPrivateData());
-                if (pfsship->IsPlayer())
-                    pfsship->GetPlayer()->ForceLoadoutChange();
-
-                pshiplink = pships->first();
-            }
-
-        }
-        else
-            pshiplink = pshiplink->next();
-    }
-
-    if (psideGhost)
-    {
-        //Find an alternate base for the ghosts ... if they don't have one, don't worry: side
-        //will be eliminated
-        for (StationLinkIGC*    psl = psideGhost->GetStations()->first(); (psl != NULL); psl = psl->next())
-        {
-            IstationIGC*    ps = psl->data();
-            if ((ps != pstation) && ps->GetBaseStationType()->HasCapability(c_sabmRestart))
-            {
-                ShipLinkIGC*        pshiplink = pships->first();
-                while (pshiplink)
-                {
-                    IshipIGC*   pship = pshiplink->data();
-                    pshiplink = pshiplink->next();
-
-                    assert (pship->GetParentShip() == NULL);
-                    assert (pship->IsGhost());
-                    pship->SetStation(ps);
-                }
-                break;
-            }
-        }
-    }
+    Allegiance::VacateStation(pstation, [](IshipIGC* pship) {
+        CFSShip* pfsship = (CFSShip*)(pship->GetPrivateData());
+        if (pfsship->IsPlayer())
+            pfsship->GetPlayer()->ForceLoadoutChange();
+    });
 }
 
 
@@ -5328,45 +4959,14 @@ void CFSMission::DeactivateSide(IsideIGC * pside)
       m_misdef.rgfReady[sideid]   = false;
       pside->SetTimeEndured(std::max(0.0f, Time::Now() - m_misdef.misparms.timeStart));
 
-      //Eliminate all of the side's drones
-      const ShipListIGC*    pships = pside->GetShips();
-      {
-        ShipLinkIGC*    pslNext;
-        for (ShipLinkIGC*   psl = pships->first(); (psl != NULL); psl = pslNext)
-        {
-            pslNext = psl->next();
-            IshipIGC*   pship = psl->data();
-
-            // BT - 2/4/2012 - Fixing clint's server crash bug: Game with one player, set to 1 life, eject pods off, launch scout, #resign causes server crash.
-            if(pship == NULL)
-                break;
-
-            if (pship->GetBaseHullType())
-            {
-                {
-                    const PartListIGC*  parts = pship->GetParts();
-                    PartLinkIGC*    plink;
-                    while (plink = parts->first())  //Not ==
-                        plink->data()->Terminate();
-                }
-                pship->SetAmmo(0);
-                pship->SetFuel(0.0f);
-            }
-
-            if (pship->GetPilotType() < c_ptPlayer)
-            {
-                m_psiteIGC->KillShipEvent(g.timeNow, pship, NULL, 0.0f, pship->GetPosition(), Vector::GetZero());
-            }
-            else
-            {
-                if ((pship->GetParentShip() == NULL) && (pship->GetCluster() != NULL))
-                    m_psiteIGC->KillShipEvent(g.timeNow, pship, NULL, -1.0f, pship->GetPosition(), Vector::GetZero());  //"Negative damage" == force killed
-
-                pship->Reset(false);
-                ((CFSShip*)(pship->GetPrivateData()))->ShipStatusExit();
-            }
-        }
-      }
+      Allegiance::EliminateSideShips(pside,
+          [this](IshipIGC* pship, float amount) {
+              m_psiteIGC->KillShipEvent(g.timeNow, pship, NULL, amount,
+                  pship->GetPosition(), Vector::GetZero());
+          },
+          [](IshipIGC* pship) {
+              ((CFSShip*)(pship->GetPrivateData()))->ShipStatusExit();
+          });
 
       BEGIN_PFM_CREATE(g.fm, pfmSideInactive, CS, SIDE_INACTIVE) // KGJV #62
       END_PFM_CREATE
@@ -5417,7 +5017,7 @@ void CFSMission::DeactivateSide(IsideIGC * pside)
 			  GameOver(psideWin, szReason);
 		  }
       }
-      else if ((m_psideWon == NULL) && pships->n())
+      else if ((m_psideWon == NULL) && pside->GetShips()->n())
       {
           //Games not over for anyone but this team (only ships on the team will be players)
           CFMGroup* pgroup = CFSSide::FromIGC(pside)->GetGroup();
@@ -5503,29 +5103,16 @@ void CFSMission::CheckForSideAllReady(IsideIGC * pside)
   if (sideid <= NA)
 	  return;
 
-  if (GetCountOfPlayers(pside, false) < m_misdef.misparms.nMinPlayersPerTeam)
-    SetReady(sideid, false);
-  else if (GetForceReady(pside->GetObjectID()))
-    SetReady(sideid, true);
-  else
-  {
-    bool fReady = true;
-    const ShipListIGC * plistShip = pside->GetShips();
-    for(ShipLinkIGC * plinkShip = plistShip->first(); plinkShip; plinkShip = plinkShip->next())
-    {
-      CFSShip * pfsShip = (CFSShip *) plinkShip->data()->GetPrivateData();
-      if (pfsShip->IsPlayer())
-      {
-        CFSPlayer * pfsPlayer = pfsShip->GetPlayer();
-        if (!pfsPlayer->GetReady())
-        {
-          fReady = false;
-          break;
+  SetReady(sideid, Allegiance::SideReady(GetCountOfPlayers(pside, false),
+      m_misdef.misparms.nMinPlayersPerTeam, GetForceReady(sideid), [&]() {
+        const ShipListIGC* ships = pside->GetShips();
+        for (ShipLinkIGC* link = ships->first(); link; link = link->next()) {
+          CFSShip* ship = (CFSShip*)link->data()->GetPrivateData();
+          if (ship->IsPlayer() && !ship->GetPlayer()->GetReady())
+            return false;
         }
-      }
-    }
-    SetReady(sideid, fReady);
-  }
+        return true;
+      }));
 }
 
 
@@ -5646,151 +5233,10 @@ void CFSMission::UpdateAlliances(SideID sideID,SideID sideAlly)
 	if (sideAlly != NA)
 		if (!((sideAlly>=0) && (sideAlly<c_cSidesMax))) return;
 
-	// convert alliance groups to bitmasks
-	int AlliesMasks[c_cSidesMax];
-	for (SideID i = 0; i <  c_cSidesMax ; i++)
-	{
-		if (GetSideAllies(i) != NA)
-		{
-			AlliesMasks[i] = 1<<i;
-			for (SideID j = 0; j <  c_cSidesMax ; j++)
-			{
-				if (GetSideAllies(j) == GetSideAllies(i))
-					AlliesMasks[i] |= 1<<j;
-			}
-		}
-		else
-			AlliesMasks[i] = 0;
-	}
-
-	debugf("UpdateAlliances begin: %d %d %d %d %d %d\n",GetSideAllies(0),GetSideAllies(1),GetSideAllies(2),GetSideAllies(3),GetSideAllies(4),GetSideAllies(5));
-	debugf("  m: %d %d %d %d %d %d\n",AlliesMasks[0],AlliesMasks[1],AlliesMasks[2],AlliesMasks[3],AlliesMasks[4],AlliesMasks[5]);
-	debugf("  team %d ,sideAlly = %d\n",sideID,sideAlly);
-
-	if (sideID != NA) // we got a valid parameter sideID
-	{
-		// update sideID AlliesMasks
-
-		// if side is active and sideAlly parameter is a real team
-		if (GetSideActive(sideID) && (sideAlly != NA))
-		{
-		   // new allies = current allies + sideAlly + itself
-		   AlliesMasks[sideID] = AlliesMasks[sideID]|(1<<sideAlly)|(1<<sideID);  // update this side allies
-		}
-		else
-			AlliesMasks[sideID]= 0;
-	}
-	debugf("  m1: %d %d %d %d %d %d\n",AlliesMasks[0],AlliesMasks[1],AlliesMasks[2],AlliesMasks[3],AlliesMasks[4],AlliesMasks[5]);
-
-	SideID NumSides = GetCountSides();
-
-	// propagate the alliances & count active sides
-	int activesides = 0;
-	for (SideID i = 0; i <  NumSides ; i++)
-	{
-		if (!GetSideActive(i)) // i is inactive, clear its alliances
-		{
-			AlliesMasks[i] = 0;
-			continue;
-		}
-		activesides++;
-
-		if (sideID == NA) continue;
-		if (i==sideID) continue;
-
-		if (AlliesMasks[sideID] & (1<<i)) // team sideID says it's allied with i
-		{
-			char merged = AlliesMasks[sideID] | AlliesMasks[i];  // so merge their alliances
-			AlliesMasks[sideID] = merged;
-			AlliesMasks[i] = merged;
-		}
-		else
-			AlliesMasks[i] = AlliesMasks[i] & ~(1<<sideID); // if not then make sure team i isnt ally with team sideid
-	}
-	debugf("  m2: %d %d %d %d %d %d\n",AlliesMasks[0],AlliesMasks[1],AlliesMasks[2],AlliesMasks[3],AlliesMasks[4],AlliesMasks[5]);
-
-	// build the final allied groups
-	char Allies[c_cSidesMax]; for (SideID i = 0; i <  c_cSidesMax ; i++) Allies[i] = NA;
-
-	if (activesides >=3) // need at least 3 active teams for alliances
-	{
-		// reset allies for solo teams  (remove them from their own allies mask)
-		for (SideID i = 0; i <  NumSides ; i++)
-		{
-			if (AlliesMasks[i] == (1<<i)) AlliesMasks[i] = 0;
-		}
-		debugf("  m3: %d %d %d %d %d %d\n",AlliesMasks[0],AlliesMasks[1],AlliesMasks[2],AlliesMasks[3],AlliesMasks[4],AlliesMasks[5]);
-
-		// propagate the alliance till it's stable
-		while (true)
-		{
-			bool stop = true;
-			for (SideID i = 0; i <  NumSides ; i++)
-			{
-				for (SideID j = 0; j <  NumSides ; j++)
-				{
-					int ai = AlliesMasks[i];
-					int aj = AlliesMasks[j];
-					if (ai & aj)                      // i & j have common allies
-					{
-						int merged = ai | aj;         // merge them
-						if ((ai != merged) || (aj != merged))
-						{
-							stop = false;             // continue if something changed
-							AlliesMasks[i] = merged;
-							AlliesMasks[j] = merged;
-						}
-					}
-				}
-			}
-			if (stop) break; // nothing changed after this pass, we stop
-		}
-		debugf("  m4: %d %d %d %d %d %d\n",AlliesMasks[0],AlliesMasks[1],AlliesMasks[2],AlliesMasks[3],AlliesMasks[4],AlliesMasks[5]);
-
-		// create the different allied groups
-
-		char groups[c_cAlliancesMax];
-		for (int gr=0;gr<c_cAlliancesMax;gr++)  groups[gr]=0; // clear the groups
-
-		int soloteams = 0; //count the solo teams found
-		int numgroups = 0; //count the groups found
-
-		for (SideID i = 0; i <  NumSides ; i++)
-		{
-			if (AlliesMasks[i] != 0) // this side has allies so find its group or build a new group
-			{
-				bool found_group = false;
-				for (int g=0;g<c_cAlliancesMax;g++)
-				{
-					if (AlliesMasks[i] == groups[g])
-					{
-						Allies[i] = g;
-						found_group = true; // we found its group
-					}
-				}
-				if (!found_group)
-				{
-					// create a new group
-					assert(numgroups<=c_cAlliancesMax) ; // shouldnt happen...
-					groups[numgroups] = AlliesMasks[i];
-					Allies[i] = numgroups;
-					numgroups++;
-				}
-			}
-			else
-			{
-				Allies[i] = NA; // this teams has no allies
-				if (GetSideActive(i)) soloteams++; // and it's a solo team if it's active
-			}
-		}
-		// validation: if no group at all OR no solo teams and only 1 group then invalid alliances
- 		debugf("  final g=%d, st=%d\n",numgroups,soloteams);
-		if ((numgroups==0) || ((soloteams==0) && (numgroups==1)))
-		{
-			// in that case, we clear all alliances
-			for (SideID i = 0; i <  c_cSidesMax ; i++) Allies[i] = NA;
-		}
-	}// activesides >=3
+    char current[c_cSidesMax], Allies[c_cSidesMax];
+    for (SideID i = 0; i < c_cSidesMax; ++i) current[i] = GetSideAllies(i);
+    Allegiance::UpdateAlliances(current, GetCountSides(), sideID, sideAlly,
+        [this](SideID side) { return GetSideActive(side); }, Allies);
 
 	// here we have valid alliances (in Allies[]) so we save them, broadcast them to everyone and update the IGC sides
 
@@ -6192,7 +5638,6 @@ void AcceptDrawBallot::OnPassed()
   Ballot::OnPassed();
   m_pmission->GameOver(NULL, "The game was declared a draw");
 }
-
 
 
 

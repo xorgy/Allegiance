@@ -103,7 +103,7 @@ class IntItemIDWrapper
 public:
     IntItemIDWrapper() {}
     IntItemIDWrapper(T t) : m_t(t) {}
-    IntItemIDWrapper(ItemID pitem) { m_t = ((int)pitem == ZeroValue) ? 0 : (T)pitem; }
+    IntItemIDWrapper(ItemID pitem) { m_t = ((intptr_t)pitem == ZeroValue) ? 0 : (T)pitem; }
 
     int operator = (T t) { m_t = t; }
     operator T () { return m_t; }

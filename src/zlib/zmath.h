@@ -12,6 +12,9 @@
 
 #include "float.h"
 #include "zassert.h"
+#ifdef ALLEGIANCE_NATIVE
+#include "simulationrandom.h"
+#endif
 
 //////////////////////////////////////////////////////////////////////////////
 //
@@ -111,9 +114,23 @@ inline float mod(float x, float limit)
     }
 }
 
+inline int randomRaw()
+{
+#ifdef ALLEGIANCE_NATIVE
+    return Allegiance::SimulationRandomRaw();
+#else
+    return rand();
+#endif
+}
+
 inline float random(float min, float max)
 {
-    return (((float)rand()) / RAND_MAX) * (max * (1.0f - FLT_EPSILON) - min) + min;
+#ifdef ALLEGIANCE_NATIVE
+    constexpr float maximum = 32767.f;
+#else
+    constexpr float maximum = RAND_MAX;
+#endif
+    return (((float)randomRaw()) / maximum) * (max * (1.0f - FLT_EPSILON) - min) + min;
 }
 
 //////////////////////////////////////////////////////////////////////////////
@@ -124,7 +141,7 @@ inline float random(float min, float max)
 
 inline int randomInt(int min, int max)
 {
-    return min + (rand() % (1 + max - min));
+    return min + (randomRaw() % (1 + max - min));
 }
 
 //////////////////////////////////////////////////////////////////////////////
@@ -282,6 +299,7 @@ extern float g_Inv255;
     __forceinline int MakeIntMacro(const float& value, int& result)
     {
         result = int(value);
+        return result;
     }
 
     __forceinline int MakeInt(float value)

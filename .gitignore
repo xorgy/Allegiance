@@ -335,3 +335,33 @@ src/Pigs/**/AGCLib.dll
 /src/build
 
 /build
+
+# Native builds, packaged releases, and local run output
+/dist/
+/docs/benchmarks/
+/log.txt
+/*.csv
+/*.ppm
+/*.pcap
+/*.pcapng
+/*.zip
+/*.zip.sha256
+/*.pkg.tar.*
+/*.src.tar.*
+*.profraw
+*.profdata
+*.dmp
+/core
+/core.[0-9]*
+/CMakeCache.txt
+/CMakeFiles/
+/cmake_install.cmake
+/install_manifest.txt
+/build.ninja
+/.ninja_deps
+/.ninja_log
+/Testing/
+
+# Local release-signing configuration
+/signing.conf
+/tools/signing.conf

@@ -9,6 +9,7 @@
  *-----------------------------------------------------------------------*/
 #ifndef _FSSHIP_H_
 #define _FSSHIP_H_
+#include "../ClientCore/CarrierLoadout.h"
 
 
 #define GETFSSHIP(pship) ((CFSShip *) (pship)->GetPrivateData())
@@ -472,29 +473,9 @@ public:
 
   void  ForceLoadoutChange(void);
 
-  void  SaveDesiredLoadout(void)
+  void SaveDesiredLoadout(void)
   {
-      {
-          IpartIGC* ppart = GetIGCShip()->GetMountedPart(ET_Magazine, 0);
-          m_ptDesiredLoadout[0] = (ppart && (ppart->GetPrice() == 0)) ? ppart->GetPartType() : NULL;
-      }
-      {
-          IpartIGC* ppart = GetIGCShip()->GetMountedPart(ET_Dispenser, 0);
-          m_ptDesiredLoadout[1] = (ppart && (ppart->GetPrice() == 0)) ? ppart->GetPartType() : NULL;
-      }
-      {
-          IpartIGC* ppart = GetIGCShip()->GetMountedPart(ET_ChaffLauncher, 0);
-          m_ptDesiredLoadout[2] = (ppart && (ppart->GetPrice() == 0)) ? ppart->GetPartType() : NULL;
-      }
-      for (Mount i = 0; (i < c_maxCargo); i++)
-      {
-          IpartIGC* ppart = GetIGCShip()->GetMountedPart(NA, -1 - i);
-          m_ptDesiredLoadout[i + 3] = (ppart &&
-                                       (ppart->GetPrice() == 0) &&
-                                       (IlauncherIGC::IsLauncher(ppart->GetObjectType())))
-                                      ? ppart->GetPartType()
-                                      : NULL;
-      }
+      Allegiance::SaveDesiredCarrierLoadout(GetIGCShip(), m_ptDesiredLoadout);
   }
 
   IpartTypeIGC**  GetDesiredLoadout(void)

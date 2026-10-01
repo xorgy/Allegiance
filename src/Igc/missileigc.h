@@ -19,9 +19,25 @@
 #include "igc.h"
 #include "modelIGC.h"
 
-class CmissileIGC : public TmodelIGC<ImissileIGC>
+class CmissileIGC
+#ifdef ALLEGIANCE_NATIVE
+// The native factory uses this concrete class directly; seal its vtable so
+// original simulation methods can inline their own getters.
+final
+#endif
+: public TmodelIGC<ImissileIGC>
 {
     public:
+#ifdef ALLEGIANCE_NATIVE
+        Time NativeExpireTime() const { return m_timeExpire; }
+        Time NativeActivateTime() const { return m_timeActivate; }
+        float NativeImpactTime() const { return m_tImpact; }
+        bool NativeDud() const { return m_bDisarmed; }
+        void NativeRestore(Time expiry,Time activation,float impact,float lock) { m_timeExpire=expiry;m_timeActivate=activation;m_tImpact=impact;m_lock=lock; }
+        uint64_t NativeShot() const { return m_nativeShot; }
+        void NativeSetShot(uint64_t shot) { m_nativeShot=shot; }
+        void NativeSetID(MissileID id) { if(m_missileID==id)return;AddRef();IclusterIGC* cluster=GetCluster();if(cluster)cluster->DeleteMissile(this);GetMyMission()->NativeDeleteMissile(this);m_missileID=id;GetMyMission()->NativeAddMissile(this);if(cluster)cluster->AddMissile(this);Release(); }
+#endif
         CmissileIGC(void);
         ~CmissileIGC(void);
 
@@ -184,7 +200,11 @@ class CmissileIGC : public TmodelIGC<ImissileIGC>
         virtual void                Disarm(void)
         {
             m_bDisarmed = true;
+#ifdef ALLEGIANCE_NATIVE
+            if (m_launcher && m_launcher->GetLastMissileFired() == this)
+#else
             if (m_launcher->GetLastMissileFired() == this)
+#endif
                 m_launcher->SetLastMissileFired(NULL);
         }
 
@@ -194,6 +214,9 @@ class CmissileIGC : public TmodelIGC<ImissileIGC>
         ImodelIGC*          m_target;
         Time                m_timeActivate;
         Time                m_timeExpire;
+#ifdef ALLEGIANCE_NATIVE
+        uint64_t m_nativeShot{};
+#endif
         float               m_tImpact;     //current estimated time of impact
         float               m_fraction;
         float               m_lock;

@@ -72,7 +72,9 @@ public:
     ZString(float value, int total, int precision);
     ZString(bool);
 
+#ifdef _WIN32
     static ZString GetProfileString(const ZString& strSection, const ZString& strKey);
+#endif
 
     const char& operator[](int index) const { return m_pdata->GetPointer()[index]; }
     int GetLength() const { return m_pdata->GetLength(); }

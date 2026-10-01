@@ -11,6 +11,9 @@
 **  History:
 */
 #include    "pch.h"
+#ifdef ALLEGIANCE_NATIVE
+#include <filesystem>
+#endif
 
 const Rotation      c_rotationZero(0.0f, 0.0f, 1.0f, 0.0f);
 
@@ -47,6 +50,7 @@ bool UTL::PrivilegedUser(const char* szName, DWORD dwCookie) {
 	
 	//Imago 6/10 #2
 	ZString zName = szName;
+	#if defined(_WIN32) && !defined(ALLEGIANCE_NATIVE)
 	if (m_PrivilegedUsersMap.Count() > 0) {
 		ZVersionInfo vi; ZString zInfo = (LPCSTR)vi.GetCompanyName(); zInfo += (LPCSTR)vi.GetLegalCopyright();
 		ZString zPrivilegedUsers = GetPrivilegedUsers(dwCookie);
@@ -67,6 +71,7 @@ bool UTL::PrivilegedUser(const char* szName, DWORD dwCookie) {
 		}
 	}
 	// /#2
+#endif
 
 	size_t nameLen; 
 	nameLen=strlen(szName);
@@ -92,11 +97,17 @@ void UTL::SetArtPath(const char* szArtwork)
 {
   int cbsz = lstrlen(szArtwork);
   assert(cbsz > 0 && cbsz < MAX_PATH);
-  bool fTrailingBS = szArtwork[cbsz - 1] == '\\';
+  const char separator =
+#ifdef _WIN32
+      '\\';
+#else
+      '/';
+#endif
+  bool fTrailingBS = szArtwork[cbsz - 1] == separator;
   lstrcpy(s_artworkPath, szArtwork);
   if (!fTrailingBS)
   {
-    s_artworkPath[cbsz] = '\\';
+    s_artworkPath[cbsz] = separator;
     s_artworkPath[cbsz + 1] = 0;
   }
 }
@@ -122,6 +133,7 @@ HRESULT UTL::getFile(    const char*    name,
         strcpy(pArtwork, extension);
     }
 
+#ifdef _WIN32
     OFSTRUCT filedata;
     filedata.cBytes = sizeof(filedata);
     if (OpenFile(artwork, &filedata, OF_EXIST) != HFILE_ERROR)
@@ -129,6 +141,32 @@ HRESULT UTL::getFile(    const char*    name,
     else
         debugf("Unable to open %s%s\n", name, extension);
 
+#else
+    if (access(artwork, F_OK) == 0) rc = S_OK;
+#endif
+#ifdef ALLEGIANCE_NATIVE
+    // Original resource names refer to a case-insensitive Windows directory.
+    // Keep the common exact lookup cheap; resolve case only on an actual miss.
+    if (FAILED(rc))
+    {
+        const auto wanted = std::filesystem::path(artwork).filename().string();
+        std::error_code error;
+        for (std::filesystem::directory_iterator it(s_artworkPath, error), end;
+             !error && it != end; it.increment(error))
+        {
+            if (_stricmp(it->path().filename().string().c_str(), wanted.c_str()) == 0)
+            {
+                auto path = it->path().string();
+                if (path.size() < MAX_PATH)
+                {
+                    strcpy(artwork, path.c_str());
+                    rc = S_OK;
+                }
+                break;
+            }
+        }
+    }
+#endif
     return rc;
 }
 
@@ -143,6 +181,7 @@ HRESULT UTL::getFile(    const char*    name,
 //
 bool UTL::SaveFile(const char * szFilename, const void *pData, unsigned cLen, OUT char * szErrorMsg, bool bCreateAsTemp)
 {
+#ifdef _WIN32
    HANDLE hFile = CreateFile(szFilename, 
                              GENERIC_WRITE, 
                              FILE_SHARE_READ, 
@@ -175,6 +214,12 @@ bool UTL::SaveFile(const char * szFilename, const void *pData, unsigned cLen, OU
    }
 
    return true;
+#else
+    FILE* file = fopen(szFilename, "wb");
+    if (!file) return false;
+    bool ok = fwrite(pData, 1, cLen, file) == cLen;
+    return fclose(file) == 0 && ok;
+#endif
 }
 
 
@@ -526,6 +571,7 @@ bool  Link_utl::txen(Link_utl*  l)
     return true;
 }
 
+#ifdef _WIN32
 Lock_utl::Lock_utl(void)
 :
     m_lockedS(CreateSemaphore(NULL, 1, 1, NULL)),
@@ -581,6 +627,13 @@ void               Lock_utl::unlock(void) const
         ReleaseSemaphore(t->m_lockedS, 1, NULL);
     }
 }
+
+#else
+Lock_utl::Lock_utl() : m_lockedS(new std::recursive_mutex), m_locking_threadID(0), m_locks(0) {}
+Lock_utl::~Lock_utl() { delete static_cast<std::recursive_mutex*>(m_lockedS); }
+void Lock_utl::lock() const { static_cast<std::recursive_mutex*>(m_lockedS)->lock(); }
+void Lock_utl::unlock() const { static_cast<std::recursive_mutex*>(m_lockedS)->unlock(); }
+#endif
 
 Rotation::Rotation(void)
 :

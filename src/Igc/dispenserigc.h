@@ -16,6 +16,7 @@
 #ifndef __DISPENSERIGC_H_
 #define __DISPENSERIGC_H_
 
+#include "../ClientCore/EquipmentStatus.h"
 #include "igc.h"
 
 /////////////////////////////////////////////////////////////////////////////
@@ -170,7 +171,7 @@ class CdispenserIGC : public IdispenserIGC
             }
             else
             {
-                return 1.0f - std::max(0.0f, (m_timeLoaded - Time::Now()) / m_expendableType->GetLoadTime());
+                return Allegiance::LauncherArmingFraction(m_timeLoaded - Time::Now(), m_expendableType->GetLoadTime());
             }
         }
 

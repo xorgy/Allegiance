@@ -31,10 +31,14 @@ namespace Training
     //------------------------------------------------------------------------------
     void        ShowEyeballAction::Execute (void)
     {
+#ifdef ALLEGIANCE_NATIVE
+        trekClient.ShowEyeball(m_showEyeball);
+#else
         PlayerInfo* pPlayerInfo = trekClient.GetPlayerInfo ();
         ShipStatus  shipStatus = pPlayerInfo->GetShipStatus ();
         shipStatus.SetDetected (m_showEyeball);
         pPlayerInfo->SetShipStatus (shipStatus);
+#endif
     }
 
     //------------------------------------------------------------------------------

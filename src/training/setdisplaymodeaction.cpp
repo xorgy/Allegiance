@@ -11,7 +11,7 @@
 **  History:
 */
 #include    "pch.h"
-#include    "SetDisplayModeAction.h"
+#include    "setdisplaymodeaction.h"
 
 namespace Training
 {

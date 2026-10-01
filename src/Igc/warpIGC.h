@@ -77,6 +77,10 @@ class CwarpIGC : public TmodelIGC<IwarpIGC>
                                           NULL);
 
                 IwarpIGC*   pwarp = GetDestination();
+#ifdef ALLEGIANCE_NATIVE
+                if (pwarp && pwarp->GetCluster())
+                {
+#endif
                 pcluster = pwarp->GetCluster();
                 pcluster->CreateExplosion(dtid,
                                           p,
@@ -85,6 +89,9 @@ class CwarpIGC : public TmodelIGC<IwarpIGC>
                                           plink->data().timeExplosion,
                                           pwarp->GetPosition(),
                                           NULL);
+#ifdef ALLEGIANCE_NATIVE
+                }
+#endif
 
                 delete plink;
             }
@@ -128,6 +135,18 @@ class CwarpIGC : public TmodelIGC<IwarpIGC>
     // IwarpIGC
 	    virtual IwarpIGC*       GetDestination(void)
         {
+#ifdef ALLEGIANCE_NATIVE
+            // Visibility retirement can remove one endpoint while retaining
+            // the other. Drop cached detached objects and resolve a newly
+            // revealed endpoint with the same ID through the live mission.
+            if (m_destination && m_destination->GetMission() != GetMyMission())
+            {
+                m_destination->Release();
+                m_destination = NULL;
+            }
+            if (!GetMyMission())
+                return NULL;
+#endif
             if (!m_destination)
             {
                 //Do a lazy evaluation of the destination so that all warps do not
@@ -149,16 +168,34 @@ class CwarpIGC : public TmodelIGC<IwarpIGC>
 
             // add the pulse effects
             Color       blastColor (0.6f, 0.8f, 1.0f);
+#ifdef ALLEGIANCE_NATIVE
+            // Offline missions can be paused or advanced independently of the
+            // host clock. Keep their visual countdown on the simulation clock.
+            float       fExplodeTime = timeExplosion - GetMyMission()->GetLastUpdate();
+#else
             float       fExplodeTime = timeExplosion - Time::Now ();
+#endif
             GetCluster ()->GetClusterSite ()->AddPulse (fExplodeTime, GetPosition (), pmt->GetBlastRadius (), blastColor);
             IwarpIGC*   pDestination = GetDestination();
+#ifdef ALLEGIANCE_NATIVE
+            if (pDestination && pDestination->GetCluster())
+            {
+#endif
             pDestination->GetCluster ()->GetClusterSite ()->AddPulse (fExplodeTime, m_destination->GetPosition (), pmt->GetBlastRadius (), blastColor);
+#ifdef ALLEGIANCE_NATIVE
+            }
+#endif
 
             // this should tell the aleph rendering site about the pulse
             ThingSite*  pThingSite = GetThingSite ();
             pThingSite->AddPulse (fExplodeTime, GetPosition (), pmt->GetBlastRadius (), blastColor);
+#ifdef ALLEGIANCE_NATIVE
+            if (pDestination && (pThingSite = pDestination->GetThingSite()))
+                pThingSite->AddPulse (fExplodeTime, GetPosition (), pmt->GetBlastRadius (), blastColor);
+#else
             pThingSite = pDestination->GetThingSite ();
             pThingSite->AddPulse (fExplodeTime, GetPosition (), pmt->GetBlastRadius (), blastColor);
+#endif
 
             m_bombs.last(p);
         }

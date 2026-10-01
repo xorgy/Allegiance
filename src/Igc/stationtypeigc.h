@@ -22,6 +22,9 @@
 class       CstationTypeIGC : public IstationTypeIGC
 {
     public:
+#ifdef ALLEGIANCE_NATIVE
+        void NativeSetStaticOwner(ImissionIGC* owner) override { m_pMission = owner; }
+#endif
         CstationTypeIGC(void)
         :
             m_pstSuccessor(NULL)

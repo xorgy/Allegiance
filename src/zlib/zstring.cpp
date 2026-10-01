@@ -249,8 +249,8 @@ ZString::ZString(float value, int total, int precision)
     char format[32];
     char buf[32];
 
-    sprintf_s(format, 32, "%%%d.%df", total, precision);
-    sprintf_s(buf, 32, format, value);
+    snprintf(format, 32, "%%%d.%df", total, precision);
+    snprintf(buf, 32, format, value);
 
     m_pdata = new ZStringData(buf);
 }
@@ -258,7 +258,7 @@ ZString::ZString(float value, int total, int precision)
 ZString::ZString(float value)
 {
         char buf[32];
-        sprintf_s(buf, 32, "%g", value);
+        snprintf(buf, 32, "%g", value);
         m_pdata = new ZStringData(buf);
 }
 
@@ -276,6 +276,7 @@ ZString operator+(const ZString& str1, const ZString& str2)
     return ZString(new ZString::ZStringData(str1.m_pdata, str2.m_pdata));
 }
 
+#ifdef _WIN32
 ZString ZString::GetProfileString(const ZString& strSection, const ZString& strKey)
 {
     char buf[256];
@@ -284,6 +285,8 @@ ZString ZString::GetProfileString(const ZString& strSection, const ZString& strK
 
     return ZString(buf, (int)dw);
 }
+
+#endif
 
 //////////////////////////////////////////////////////////////////////////////
 //
@@ -681,6 +684,7 @@ PathString::PathString(PCC pcc) :
 
 PathString PathString::GetCurrentDirectory()
 {
+#ifdef _WIN32
     int size = ::GetCurrentDirectory(0, nullptr);
     char* pch = new char[size];
     ::GetCurrentDirectory(size, pch);
@@ -688,12 +692,24 @@ PathString PathString::GetCurrentDirectory()
     delete[] pch;
 
     return str;
+#else
+    char* path = getcwd(nullptr, 0);
+    if (!path) return PathString("");
+    PathString result(path);
+    free(path);
+    return result;
+#endif
 }
 
 PathString PathString::GetModulePath()
 {
-    char ch[128];
+    char ch[MAX_PATH];
+#ifdef _WIN32
     GetModuleFileNameA(nullptr, ch, sizeof(ch) / sizeof(*ch));
+#else
+    auto n = readlink("/proc/self/exe", ch, sizeof(ch) - 1);
+    ch[n < 0 ? 0 : n] = 0;
+#endif
     return PathString(ch);
 }
 

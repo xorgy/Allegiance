@@ -1,4 +1,5 @@
 #include "explosion.h"
+#include "../ClientCore/ExplosionEffects.h"
 
 //////////////////////////////////////////////////////////////////////////////
 //
@@ -112,9 +113,11 @@ public:
             list.PushFront();
             ExplosionData&     edata = list.GetFront();
 
-            edata.m_timeStart = GetTime()->GetValue() + index * 0.25f;
+            edata.m_timeStart = GetTime()->GetValue() + Allegiance::ExplosionDelay(index);
             edata.m_pimage    = vpimage[indexImage];
-            edata.m_position  = position + Vector::RandomPosition(radiusExplosion * 0.5f);
+            edata.m_position  = Allegiance::ExplosionPosition(position, radiusExplosion,
+                [](float low, float high) { return random(low, high); },
+                []() { return Vector::RandomDirection(); });
             edata.m_dposition = dposition;
             edata.m_angle     = random(0, 2 * pi);
             edata.m_scale     = radiusExplosion;
@@ -150,7 +153,7 @@ public:
             ShockwaveData& sdata = iter.Value();
 
             float time   = GetTime()->GetValue() - sdata.m_timeStart;
-            float bright = 1.0f - time * time;
+            float bright = Allegiance::ShockwaveBrightness(time);
 
             if (bright <= 0) {
                 iter.Remove();

@@ -573,7 +573,7 @@ IclusterIGC * CmapMakerIGC::GenerateTeamCluster(CMapData * pMapData,
     dc.planetLongitude = random(0.0f, 1.0f);
     dc.planetRadius = (unsigned char)randomInt(50, 100);
 
-    dc.starSeed = rand();
+    dc.starSeed = randomRaw();
     dc.nDebris = randomInt(250, 750);
     dc.nStars = randomInt(250, 750);
 
@@ -624,7 +624,7 @@ IclusterIGC * CmapMakerIGC::GenerateNeutralCluster(CMapData * pMapData,
     dc.posterName[6] = '\0';
     dc.planetName[0] = '\0';
 
-    dc.starSeed = rand();
+    dc.starSeed = randomRaw();
     dc.nDebris = randomInt(250, 750);
     dc.nStars = randomInt(250, 750);
 
@@ -673,6 +673,7 @@ VOID CmapMakerIGC::GenerateRingClusters(CMapData * pMapData)
     {
         pCluster = this->GenerateNeutralCluster(pMapData, sID);
         pMapData->SetCluster(sID, pCluster, NA);
+        pCluster->Release();
         sID++;
     }
 }

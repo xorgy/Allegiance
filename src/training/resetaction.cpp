@@ -11,12 +11,12 @@
 **  History:
 */
 #include    "pch.h"
-#include    "ResetAction.h"
-#include    "PlaySoundAction.h"
+#include    "resetaction.h"
+#include    "playsoundaction.h"
 #include    "SuspendedSoundFinishedCondition.h"
-#include    "MessageAction.h"
-#include    "TrainingMission.h"
-#include    "ConditionalAction.h"
+#include    "messageaction.h"
+#include    "trainingmission.h"
+#include    "conditionalaction.h"
 #include    "ProxyAction.h"
 
 namespace Training

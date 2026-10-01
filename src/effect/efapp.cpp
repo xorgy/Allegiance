@@ -177,33 +177,8 @@ public:
         while (!iter.End()) {
             LightData& data = iter.Value();
 
-            float value;
-
-            while (true) {
-                value = m_time - data.m_phase;
-                if (value < data.m_period) {
-                    break;
-                }
-                data.m_phase += data.m_period;
-            }
-
-            if (value < data.m_rampUp) {
-                value /= data.m_rampUp;
-            } else {
-                value -= data.m_rampUp;
-
-                if (value < data.m_hold) {
-                    value = 1;
-                } else {
-                    value -= data.m_hold;
-
-                    if (value < data.m_rampDown) {
-                        value = 1 - (value / data.m_rampDown);
-                    } else {
-                        value = 0;
-                    }
-                }
-            }
+            float value = Allegiance::StrobeBrightness(m_time, data.m_period, data.m_phase,
+                data.m_rampUp, data.m_hold, data.m_rampDown);
 
             if (value > 0) {
                 pcontext->DrawDecal(

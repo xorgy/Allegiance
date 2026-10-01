@@ -10,16 +10,55 @@
 **  History:
 */
 #include "pch.h"
+#if defined(ALLEGIANCE_NATIVE) && defined(__SSE2__)
+#include <xmmintrin.h>
+namespace {
+bool nativeBoxesSeparated(const BoundingBox& query,const BoundingBox& bounds) {
+    // XY lanes are {-query.min, query.max} and {-node.max, node.min}.
+    return _mm_movemask_ps(_mm_cmple_ps(_mm_loadu_ps(query.axes[0].values),_mm_loadu_ps(bounds.axes[0].values))) ||
+           query.axes[2].values[1]<=bounds.axes[2].values[0] ||
+           query.axes[2].values[0]>=bounds.axes[2].values[1];
+}
+bool nativeBoxesOverlap(const BoundingBox& query,const BoundingBox& bounds) {
+    auto b=_mm_loadu_ps(bounds.axes[0].values);
+    b=_mm_xor_ps(_mm_shuffle_ps(b,b,_MM_SHUFFLE(2,3,0,1)),_mm_setr_ps(-0.f,0.f,-0.f,0.f));
+    return _mm_movemask_ps(_mm_cmpgt_ps(_mm_loadu_ps(query.axes[0].values),b))==15 &&
+           query.axes[2].values[1]>bounds.axes[2].values[0] &&
+           query.axes[2].values[0]<bounds.axes[2].values[1];
+}
+}
+#endif
 
 //Allocate space for the node's hitTest and endpoint arrays
 //(as a single allocation)
-void    KDnode::allocHitTestsEndpoints(int n)
+void    KDnode::allocHitTestsEndpoints(int n
+#ifdef ALLEGIANCE_NATIVE
+                                     ,bool endpoints
+#endif
+                                     )
 {
+#ifdef ALLEGIANCE_NATIVE
+    if(m_parent){
+        if(m_maxHitTests<n || (endpoints && !m_nativeEndpointStorage)){
+            m_nativeOrder.reset(new uint32_t[n*(endpoints?1+2*c_nAxes:1)]);
+            m_maxHitTests=n;m_nativeEndpointStorage=endpoints;
+        }
+        return;
+    }
+#endif
     if (m_maxHitTests < n)
     {
         //Not enough space ... realloc
         delete [] m_ppHitTests;
+#ifdef ALLEGIANCE_NATIVE
+        // Children use compact endpoint tokens; only the root needs the
+        // original pointer arrays for its unchanged endpoint sorting.
+        m_nativeOrder.reset(new uint32_t[n*(1+2*c_nAxes)]);
+        m_nativeEndpointStorage=true;
+        void** v = new void* [n*(1+2*c_nAxes)];
+#else
         void**  v = new void* [n * (1 + 2 * c_nAxes)];
+#endif
         assert (v);
 
         m_maxHitTests = n;
@@ -57,23 +96,54 @@ void    KDnode::reset(bool             highF)
 
     //Set asside enough space for the same number of hitTests as the parent
     //(pessimistic, but fast)
+#ifndef ALLEGIANCE_NATIVE
     allocHitTestsEndpoints(m_parent->m_nHitTests);
+#endif
 
     int     pivotAxis = m_parent->m_pivotAxis;
     assert (pivotAxis >= 0);
     assert (pivotAxis < c_nAxes);
     float   pivotValue = m_parent->m_pivotValue;
+#ifdef ALLEGIANCE_NATIVE
+    m_nativeBoxes=m_parent->m_nativeBoxes;m_nativeFlags=m_parent->m_nativeFlags;m_nativeHits=m_parent->m_nativeHits;
+    m_nativeHasTargets=false;
+#endif
 
     //Extract and mark the subset of the parent's hitTests that belong to this node
     {
         m_nHitTests = 0;
+#ifdef ALLEGIANCE_NATIVE
+        // Membership is the low endpoint below the pivot, or the high endpoint
+        // above it. Find that boundary once in the parent's sorted token array;
+        // mark dense byte flags instead of reading every object's bounds.
+        for(int i=0;i<m_parent->m_nHitTests;++i)m_nativeFlags[m_parent->m_nativeOrder[i]]&=2;
+        const auto* endpoints=m_parent->nativeEndpoints(pivotAxis);int size=m_parent->m_nHitTests*2;
+        int first=0,last=size;
+        while(first<last){int middle=first+(last-first)/2;auto token=endpoints[middle];
+            float value=m_nativeBoxes[token>>1].bounds.axes[pivotAxis].values[token&1];
+            if(highF?value<=pivotValue:value<pivotValue)first=middle+1;else last=middle;
+        }
+        int members=0;
+        for(int i=highF?first:0,end=highF?size:first;i<end;++i){auto token=endpoints[i];
+            if(bool(token&1)==highF){auto& flags=m_nativeFlags[token>>1];flags|=1;++members;m_nativeHasTargets|=bool(flags&2);}
+        }
+        // Count from the same qualifying endpoints before reserving storage.
+        // Leaves need only membership indices; internal nodes additionally
+        // need their three sorted endpoint arrays. Capacity survives frames.
+        allocHitTestsEndpoints(members,members>=c_minNodeSize && m_nativeHasTargets);
+        // Original member order is retained for construction and its oracle;
+        // the query cache materializes only eligible targets at leaves.
+        for(int parentID=m_parent->m_nHitTests-1;parentID>=0;--parentID){
+            auto index=m_parent->m_nativeOrder[parentID];auto flags=m_nativeFlags[index];
+            if(flags&1)m_nativeOrder[m_nHitTests++]=index;
+        }
+#else
         for (HitTest** ppHitTest = &m_parent->m_ppHitTests[m_parent->m_nHitTests - 1];
              (ppHitTest >= m_parent->m_ppHitTests);
              ppHitTest--)
         {
             HitTest* pHitTest = *ppHitTest;
             assert (pHitTest);
-
             if (highF)
             {
                 //Creating the high child ... anything extending above the pivot value is accepted
@@ -98,9 +168,18 @@ void    KDnode::reset(bool             highF)
             }
         }
 
+#endif
+
         assert (m_nHitTests != 0);
         assert (m_nHitTests != m_parent->m_nHitTests);
     }
+
+#ifdef ALLEGIANCE_NATIVE
+    // Null-ID objects cast rays but can never pass query.id < target.id.
+    // Such a branch returns nothing regardless of how it would partition;
+    // retain its membership but avoid sorting and recursively building it.
+    if(!m_nativeHasTargets){m_pivotAxis=-1;return;}
+#endif
 
     if (m_nHitTests >= c_minNodeSize)
     {
@@ -122,23 +201,39 @@ void    KDnode::reset(bool             highF)
             {
                 assert (parentID >= 0);
 
-                HitTest* pHitTest = m_parent->m_ppEndpoints[axis][parentID]->pHitTest;
-                if (pHitTest->m_activeF)
-                    m_ppEndpoints[axis][thisID--] = m_parent->m_ppEndpoints[axis][parentID];
+#ifdef ALLEGIANCE_NATIVE
+                auto token=m_parent->nativeEndpoints(axis)[parentID];
+                if(m_nativeFlags[token>>1]&1)nativeEndpoints(axis)[thisID--]=token;
+#else
+                auto* endpoint=m_parent->m_ppEndpoints[axis][parentID];
+                if(endpoint->pHitTest->m_activeF)m_ppEndpoints[axis][thisID--]=endpoint;
+#endif
             }
             //There's no need to sort the endpoint list (since is was sorted in the parent).
         }
 
+#ifdef ALLEGIANCE_NATIVE
+        refreshNativeBounds(true);
+#endif
         pivot();
     }
-    else
+    else {
         m_pivotAxis = -1;
+#ifdef ALLEGIANCE_NATIVE
+        refreshNativeBounds();
+#endif
+    }
 }
 
+#ifdef ALLEGIANCE_NATIVE
+template<class Box>
+static bool findPivot(int nHitTests,const uint32_t* ppEndpoints,const Box* boxes,int axis,float* pValue,int* pCost)
+#else
 static bool findPivot(int               nHitTests,
                       Endpoint* const * ppEndpoints,
                       float*            pValue,
                       int*              pCost)
+#endif
 {
     assert (nHitTests >= c_minNodeSize);
     assert (ppEndpoints);
@@ -162,8 +257,12 @@ static bool findPivot(int               nHitTests,
 
     //The endpoints start with a low and end with a high, meaning we can skip the first endpoint
     //in the loop (hence the pre-increment) and only test for exit on the high endpoints.
+#ifdef ALLEGIANCE_NATIVE
+    assert(!(ppEndpoints[0]&1));assert(ppEndpoints[(nHitTests<<1)-1]&1);
+#else
     assert (!ppEndpoints[0]->highF);
     assert (ppEndpoints[(nHitTests << 1) - 1]->highF);
+#endif
 
     int nLow = 0;               //Number of intervals completely below of the current endpoint
     int nHigh = nHitTests - 1;   //Number of intervales completely above the current endpoint
@@ -176,7 +275,13 @@ static bool findPivot(int               nHitTests,
     while (true)
     {
         assert (nLow < nHitTests);
+#ifdef ALLEGIANCE_NATIVE
+        auto token=*(++ppEndpoints);
+        struct Value {bool highF;const float& value;} endpoint{bool(token&1),boxes[token>>1].bounds.axes[axis].values[token&1]};
+        const auto* pEndpoint=&endpoint;
+#else
         const Endpoint* pEndpoint = *(++ppEndpoints);
+#endif
 
         if (pEndpoint->highF)
         {
@@ -250,7 +355,11 @@ void    KDnode::pivot(void)
     int     bestCost;
 
     bool optimalF = findPivot(m_nHitTests,
+#ifdef ALLEGIANCE_NATIVE
+                              nativeEndpoints(bestAxis),m_nativeBoxes,bestAxis,
+#else
                               m_ppEndpoints[bestAxis],
+#endif
                               &bestValue,
                               &bestCost);
 
@@ -261,7 +370,11 @@ void    KDnode::pivot(void)
         int     cost;
         
         optimalF = findPivot(m_nHitTests,
+#ifdef ALLEGIANCE_NATIVE
+                             nativeEndpoints(axis),m_nativeBoxes,axis,
+#else
                              m_ppEndpoints[axis],
+#endif
                              &value, &cost);
 
         if (cost < bestCost)
@@ -297,29 +410,99 @@ void    KDnode::pivot(void)
         m_pivotAxis = -1;
 }
 
+#ifdef ALLEGIANCE_NATIVE
+void KDnode::refreshNativeBounds(bool sortedEndpoints)
+{
+    if(!m_nHitTests)return;
+    if(sortedEndpoints){
+        // Filtering preserves endpoint order, so its extremes are also the
+        // exact union bounds. Avoid another object scan at every tree level.
+        for(int a=0;a<c_nAxes;++a){
+            auto low=nativeEndpoints(a)[0],high=nativeEndpoints(a)[(m_nHitTests<<1)-1];
+            m_nativeBounds.axes[a].values[0]=m_nativeBoxes[low>>1].bounds.axes[a].values[low&1];
+            m_nativeBounds.axes[a].values[1]=m_nativeBoxes[high>>1].bounds.axes[a].values[high&1];
+        }
+    }else{
+        m_nativeBounds=m_nativeBoxes[m_nativeOrder[0]].bounds;
+        for(int i=1;i<m_nHitTests;++i)for(int a=0;a<c_nAxes;++a){const auto& b=m_nativeBoxes[m_nativeOrder[i]].bounds.axes[a];auto& bound=m_nativeBounds.axes[a];
+            bound.values[0]=std::min(bound.values[0],b.values[0]);bound.values[1]=std::max(bound.values[1],b.values[1]);}
+    }
+#ifdef __SSE2__
+    auto xy=_mm_loadu_ps(m_nativeBounds.axes[0].values);
+    xy=_mm_xor_ps(_mm_shuffle_ps(xy,xy,_MM_SHUFFLE(2,3,0,1)),_mm_setr_ps(-0.f,0.f,-0.f,0.f));
+    _mm_storeu_ps(m_nativeBounds.axes[0].values,xy);
+#endif
+}
+#endif
+
 void   KDnode::test(HitTest*        pHitTest1,
                     CollisionQueue* pQueue) const
 {
+#if defined(ALLEGIANCE_NATIVE) && defined(__SSE2__)
+    BoundingBox query=pHitTest1->m_boundingBox;
+    auto xy=_mm_xor_ps(_mm_loadu_ps(query.axes[0].values),_mm_setr_ps(-0.f,0.f,-0.f,0.f));
+    _mm_storeu_ps(query.axes[0].values,xy);
+    testNative(pHitTest1,pQueue,query);
+}
+void KDnode::testNative(HitTest* pHitTest1,CollisionQueue* pQueue,const BoundingBox& query)const
+{
+#endif
+#ifdef ALLEGIANCE_NATIVE
+    if(!m_nHitTests || !m_nativeHasTargets)return;
+    // The original pivot traversal and leaf order stay intact. Reject only
+    // subtrees whose complete swept boxes cannot pass HitTest::Collide's box test.
+#ifdef __SSE2__
+    if(nativeBoxesSeparated(query,m_nativeBounds))return;
+#else
+    for(int a=0;a<c_nAxes;++a){const auto& query=pHitTest1->m_boundingBox.axes[a];const auto& bound=m_nativeBounds.axes[a];
+        if(query.values[1]<=bound.values[0] || query.values[0]>=bound.values[1])return;}
+#endif
+#endif
     if (m_pivotAxis >= 0)
     {
         //Pass the hit tests along to one or both children
         const Interval&  interval = pHitTest1->m_boundingBox.axes[m_pivotAxis];
 
         if (interval.values[0] < m_pivotValue)
-            m_children[0]->test(pHitTest1, pQueue);
+#if defined(ALLEGIANCE_NATIVE) && defined(__SSE2__)
+            m_children[0]->testNative(pHitTest1,pQueue,query);
+#else
+            m_children[0]->test(pHitTest1,pQueue);
+#endif
 
         if (interval.values[1] > m_pivotValue)
-            m_children[1]->test(pHitTest1, pQueue);
+#if defined(ALLEGIANCE_NATIVE) && defined(__SSE2__)
+            m_children[1]->testNative(pHitTest1,pQueue,query);
+#else
+            m_children[1]->test(pHitTest1,pQueue);
+#endif
     }
     else
     {
         //this is a terminal node: test bb against each contained hitTest's bounding box
+#ifdef ALLEGIANCE_NATIVE
+        for(int i=m_nHitTests-1;i>=0;--i){
+            HitTest* pHitTest2=nativeHit(i);
+#else
         for (HitTest** ppHitTest = &m_ppHitTests[m_nHitTests - 1];
              (ppHitTest >= m_ppHitTests);
              ppHitTest--)
         {
             HitTest*    pHitTest2 = *ppHitTest;
+#endif
             if ((pHitTest1->m_id < pHitTest2->m_id) &&
+#ifdef ALLEGIANCE_NATIVE
+#ifdef __SSE2__
+                nativeBoxesOverlap(query,pHitTest2->m_boundingBox) &&
+#else
+                (pHitTest1->m_boundingBox.axes[0].values[1] > pHitTest2->m_boundingBox.axes[0].values[0]) &&
+                (pHitTest1->m_boundingBox.axes[0].values[0] < pHitTest2->m_boundingBox.axes[0].values[1]) &&
+                (pHitTest1->m_boundingBox.axes[1].values[1] > pHitTest2->m_boundingBox.axes[1].values[0]) &&
+                (pHitTest1->m_boundingBox.axes[1].values[0] < pHitTest2->m_boundingBox.axes[1].values[1]) &&
+                (pHitTest1->m_boundingBox.axes[2].values[1] > pHitTest2->m_boundingBox.axes[2].values[0]) &&
+                (pHitTest1->m_boundingBox.axes[2].values[0] < pHitTest2->m_boundingBox.axes[2].values[1]) &&
+#endif
+#endif
                 (pHitTest2->m_lastTest != pHitTest1) &&
                 (pHitTest1->m_noHit != pHitTest2) &&
                 (pHitTest2->m_noHit != pHitTest1))

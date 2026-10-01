@@ -1672,12 +1672,7 @@ public:
 
         int count = GetChildCount();
 		// mdvalley: define it out here
-		int index;
-        for (index = 0; index < count - 1; index++) {
-            if (radius > m_radii[index]) {
-                break;
-            }
-        }
+        int index = Allegiance::SelectModelLod(radius, count, [&](int i) { return m_radii[i]; });
 
         if (index == count - 1) {
             //

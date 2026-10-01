@@ -20,6 +20,9 @@
 CmodelIGC::CmodelIGC(ImodelIGC* model)
 :
     m_model(model),
+#ifdef ALLEGIANCE_NATIVE
+    m_pMission(nullptr),
+#endif
     m_visibleF(true),
     m_render(c_ucRenderAll),
     m_selectedF(false),
@@ -165,6 +168,9 @@ HRESULT     CmodelIGC::Load(int                options,
 
 void    CmodelIGC::SetVisibleF(bool visibleF)
 {
+#ifdef ALLEGIANCE_NATIVE
+    if(m_visibleF!=visibleF)m_nativeSpinValid=false;
+#endif
     if (m_visibleF != visibleF)
     {
         m_visibleF = visibleF;
@@ -180,6 +186,9 @@ void    CmodelIGC::SetRender(unsigned char render)
 
 void    CmodelIGC::SetPosition(const Vector& newVal)
 {
+#ifdef ALLEGIANCE_NATIVE
+    if(m_cluster && !(m_attributes&c_mtNotPickable) && m_model->GetObjectType()!=OT_buoy)m_cluster->InvalidateDodgeIndex();
+#endif
     assert (newVal * newVal >= 0.0f);
     m_pHitTest->SetPosition(newVal);
     m_pThingSite->SetPosition(newVal);
@@ -187,6 +196,9 @@ void    CmodelIGC::SetPosition(const Vector& newVal)
 
 void    CmodelIGC::SetOrientation(const Orientation& newVal)
 {
+#ifdef ALLEGIANCE_NATIVE
+    m_nativeSpinValid=false;
+#endif
     m_pHitTest->SetOrientation(newVal);
 
     if (m_pThingSite)
@@ -240,6 +252,10 @@ void    CmodelIGC::SetMyAttributes(ModelAttributes newVal)
         }
     }
 
+#ifdef ALLEGIANCE_NATIVE
+    if(m_cluster && (((m_attributes^newVal)&c_mtSeenBySide) ||
+        (newVal&(c_mtSeenBySide|c_mtNotPickable))==(c_mtSeenBySide|c_mtNotPickable)))m_cluster->RequireFullVisibilityScan();
+#endif
     m_attributes = newVal;
 }
 

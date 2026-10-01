@@ -36,7 +36,7 @@ namespace Training
         {
             IshieldIGC* pShield = static_cast<IshieldIGC*> (pShip->GetMountedPart (ET_Shield, 0));
             if (pShield and (pShield->GetFraction () > 0.2f))
-                pShip->ReceiveDamage (c_dmgidCollision, pShield->GetMaxStrength () * 0.03f, Time::Now (), Vector (-1.0f, 0.0f, 0.0f), Vector (1.0f, 0.0f, 0.0f), 0);
+                pShip->ReceiveDamage (c_dmgidCollision, pShield->GetMaxStrength () * 0.03f, Clock::Now (), Vector (-1.0f, 0.0f, 0.0f), Vector (1.0f, 0.0f, 0.0f), 0);
 
         }
         else
@@ -45,7 +45,7 @@ namespace Training
             if (pShield and (pShield->GetFraction () > 0.25f))
                 pShield->SetFraction (0.2f);
             else if (pShip->GetFraction () > 0.5f)
-                pShip->ReceiveDamage (c_dmgidCollision, 7.5f, Time::Now (), Vector (-1.0f, 0.0f, 0.0f), Vector (1.0f, 0.0f, 0.0f), 0);
+                pShip->ReceiveDamage (c_dmgidCollision, 7.5f, Clock::Now (), Vector (-1.0f, 0.0f, 0.0f), Vector (1.0f, 0.0f, 0.0f), 0);
         }
     }
 

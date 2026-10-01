@@ -35,7 +35,9 @@ namespace Training
     void        CreateObjectAction::Execute (void)
     {
         ImissionIGC*    pMission = trekClient.GetCore();
-        m_result = pMission->CreateObject (pMission->GetLastUpdate(), m_objectType, m_pData, m_iDataSize);
+        IbaseIGC* created = pMission->CreateObject (pMission->GetLastUpdate(), m_objectType, m_pData, m_iDataSize);
+        m_result = created;
+        if (created) created->Release(); // m_result retains the action's reference
     }
 
     //------------------------------------------------------------------------------

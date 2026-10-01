@@ -22,6 +22,12 @@
 class CweaponIGC : public IweaponIGC
 {
     public:
+#ifdef ALLEGIANCE_NATIVE
+        uint32_t NativeShots() const { return m_nativeShots; }
+        Time NativeNextFire() const { return m_nextFire; }
+        uint32_t NativeFlags() const { return unsigned(m_fActive)|(unsigned(m_fFiringShot)<<1)|(unsigned(m_fFiringBurst)<<2); }
+        void NativeRestore(Time next,uint32_t shots,uint32_t flags) { m_nextFire=next;m_nativeShots=shots;m_fActive=flags&1;m_fFiringShot=flags&2;m_fFiringBurst=flags&4; }
+#endif
         CweaponIGC(void);
 
     // IbaseIGC
@@ -265,6 +271,9 @@ class CweaponIGC : public IweaponIGC
 
         IprojectileTypeIGC*         m_projectileType;
         Time                        m_nextFire;
+#ifdef ALLEGIANCE_NATIVE
+        uint32_t m_nativeShots{};
+#endif
 
         const Vector*               m_pposition;
         const Orientation*          m_porientation;

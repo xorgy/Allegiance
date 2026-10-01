@@ -11,33 +11,33 @@
 **  History:
 */
 #include    "pch.h"
-#include    "TrainingMission.h"
+#include    "trainingmission.h"
 
-#include    "GoalList.h"
+#include    "goallist.h"
 #include    "Predicate.h"
-#include    "TrueCondition.h"
-#include    "FalseCondition.h"
-#include    "AndCondition.h"
-#include    "OrCondition.h"
-#include    "NotCondition.h"
-#include    "PeriodicCondition.h"
-#include    "ElapsedTimeCondition.h"
-#include    "ObjectMovingTowardsCondition.h"
-#include    "ObjectWithinRadiusCondition.h"
-#include    "ObjectPointingAtCondition.h"
-#include    "ConditionalAction.h"
-#include    "ConditionList.h"
-#include    "ActionList.h"
-#include    "MessageAction.h"
-#include    "PlaySoundAction.h"
-#include    "SetCommandAction.h"
-#include    "NoAction.h"
-#include    "NTimesCondition.h"
-#include    "EndMissionAction.h"
-#include    "ResetAction.h"
-#include    "ResetShipAction.h"
-#include    "SoundFinishedCondition.h"
-#include    "SetDisplayModeAction.h"
+#include    "truecondition.h"
+#include    "falsecondition.h"
+#include    "andcondition.h"
+#include    "orcondition.h"
+#include    "notcondition.h"
+#include    "periodiccondition.h"
+#include    "elapsedtimecondition.h"
+#include    "objectmovingtowardscondition.h"
+#include    "objectwithinradiuscondition.h"
+#include    "objectpointingatcondition.h"
+#include    "conditionalaction.h"
+#include    "conditionlist.h"
+#include    "actionlist.h"
+#include    "messageaction.h"
+#include    "playsoundaction.h"
+#include    "setcommandaction.h"
+#include    "noaction.h"
+#include    "ntimescondition.h"
+#include    "endmissionaction.h"
+#include    "resetaction.h"
+#include    "resetshipaction.h"
+#include    "soundfinishedcondition.h"
+#include    "setdisplaymodeaction.h"
 #include    "TurnShipAboutCondition.h"
 #include    "GetRadarLODCondition.h"
 #include    "SetRadarLODAction.h"
@@ -66,6 +66,7 @@ namespace Training
     m_pChatCondition (0),
     m_bSkipPostSlideShow (false),
     m_commandViewEnabled(false),
+    m_endAfterStationLoss(false),
     m_killCount(0)
     {
         // get the window pointer
@@ -75,9 +76,11 @@ namespace Training
         if ((m_fHUDStyle = pWindow->GetHUDStyle ()) != 0.0f)
             pWindow->SetHUDStyle (0.0f);
 
+#ifndef ALLEGIANCE_NATIVE
         // load the existing key map Imago 6/20/09 (TheRock@RT)
 		if (!GetWindow()->GetInput()->LoadMap(INPUTMAP_FILE)) 
 			GetWindow()->GetInput()->LoadMap(DEFAULTINPUTMAP_FILE);
+#endif
         
     }
 
@@ -104,6 +107,10 @@ namespace Training
         // get the window pointer
         TrekWindow* pWindow = GetWindow ();
 
+#ifdef ALLEGIANCE_NATIVE
+        trekClient.FinishMission(m_bSkipPostSlideShow);
+        pWindow->SetHUDStyle(m_fHUDStyle);
+#else
         // check to see if we have quit or ar just running through the end of the mission
         if (m_bSkipPostSlideShow)
             // go back to the training screen
@@ -123,9 +130,11 @@ namespace Training
         // load the customized key map if one exists
         pWindow->GetInput ()->LoadMap (INPUTMAP_FILE);
 
+#endif
+
         // restart the game clock (if it was paused)
-        if (Time::IsPaused ())
-            Time::Continue ();
+        if (Clock::IsPaused ())
+            Clock::Continue ();
     }
 
     //------------------------------------------------------------------------------
@@ -153,7 +162,11 @@ namespace Training
     void        TrainingMission::Start (void)
     {
         trekClient.ClearLoadout ();
+        #ifdef ALLEGIANCE_NATIVE
+        trekClient.ClearMessages();
+#else
         trekClient.GetClientEventSource ()->OnClearChat ();
+#endif
         CreateUniverse ();
         trekClient.OnEnterGame();
         m_pCondition = CreateMission ();
@@ -166,19 +179,29 @@ namespace Training
     //------------------------------------------------------------------------------
     bool        TrainingMission::Frame (void)
     {
+        // Replace the action tree only between evaluations. Station destruction
+        // can be triggered by an action in that very tree.
+        if (m_endAfterStationLoss && m_pCondition) {
+            m_endAfterStationLoss = false;
+            for (Condition* condition : m_WaitConditionList) delete condition;
+            m_WaitConditionList.clear();
+            delete m_pCondition;
+            m_pCondition = new Goal(new ElapsedTimeCondition(4.0f));
+            m_pCondition->Start();
+        }
         // Check that the play condition is valid.
         if (m_pCondition)
         {
             // Check to see if the mission is paused, and evaluate the mission
             // goals only if it is running.
-            if (not Time::IsPaused ())
+            if (not Clock::IsPaused ())
             {
                 // Respawn mechanism
                 char skipGroup = NA;
-                for each (RespawnData* rd in m_RespawnList) {
-                    if (!trekClient.GetCore()->GetShip(rd->pspawnCDA->GetShipID()) && Time::Now() > rd->tDestroyed + rd->downtime) { //ship is destroyed && ready to respawn
+                for (RespawnData* rd : m_RespawnList) {
+                    if (!trekClient.GetCore()->GetShip(rd->pspawnCDA->GetShipID()) && Clock::Now () > rd->tDestroyed + rd->downtime) { //ship is destroyed && ready to respawn
                         if (rd->tDestroyed == 0)
-                            rd->tDestroyed = Time::Now();
+                            rd->tDestroyed = Clock::Now ();
                         else {
                             if (rd->spawnGroup == NA) {
                                 rd->pspawnCDA->Execute();
@@ -188,7 +211,7 @@ namespace Training
                                 std::list<RespawnData*> spawnGroup;
                                 spawnGroup.push_front(rd);
                                 bool waveReady = true;
-                                for each (RespawnData* rdOther in m_RespawnList) {
+                                for (RespawnData* rdOther : m_RespawnList) {
                                     if (rdOther->spawnGroup == rd->spawnGroup && rdOther->pspawnCDA->GetShipID() != rd->pspawnCDA->GetShipID()) {
                                         if (trekClient.GetCore()->GetShip(rdOther->pspawnCDA->GetShipID())) { // other ship is alive
                                             waveReady = false;
@@ -196,8 +219,8 @@ namespace Training
                                         }
                                         else { // other ship is destroyed
                                             if (rdOther->tDestroyed == 0)
-                                                rdOther->tDestroyed = Time::Now();
-                                            if (Time::Now() > rdOther->tDestroyed + rdOther->downtime)
+                                                rdOther->tDestroyed = Clock::Now ();
+                                            if (Clock::Now () > rdOther->tDestroyed + rdOther->downtime)
                                                 spawnGroup.push_back(rdOther);
                                             else {
                                                 waveReady = false;
@@ -207,7 +230,7 @@ namespace Training
                                     }
                                 }
                                 if (waveReady) {
-                                    for each (RespawnData* rdgm in spawnGroup) {
+                                    for (RespawnData* rdgm : spawnGroup) {
                                         ZAssert(!trekClient.GetCore()->GetShip(rdgm->pspawnCDA->GetShipID()));
                                         rdgm->pspawnCDA->Execute();
                                         rdgm->tDestroyed = 0;
@@ -269,12 +292,14 @@ namespace Training
     void        TrainingMission::Terminate (void)
     {
         // pause the game clock, if it isn't already stopped
-        if (not Time::IsPaused ())
-            Time::Pause ();
+        if (not Clock::IsPaused ())
+            Clock::Pause ();
 
         // swap the condition into dead space, and set it to null
-        m_pDeadCondition = m_pCondition;
-        m_pCondition = 0;
+        if (m_pCondition) {
+            m_pDeadCondition = m_pCondition;
+            m_pCondition = 0;
+        }
     }
 
     //------------------------------------------------------------------------------
@@ -300,7 +325,7 @@ namespace Training
             rd->tDestroyed = 0;
         }
         else
-            rd->tDestroyed = Time::Now();
+            rd->tDestroyed = Clock::Now ();
         if (!spawned) {
             if (rd->pspawnCDA->GetCommandTargetType() == OT_buoy) {
                 ImodelIGC* pmodel = trekClient.GetCore()->GetModel(OT_buoy, rd->pspawnCDA->GetCommandTargetID());
@@ -316,11 +341,14 @@ namespace Training
     }
 
     void TrainingMission::RemoveRespawn(ShipID shipID) {
-        for each (RespawnData* rd in m_RespawnList)
+        for (auto it = m_RespawnList.begin(); it != m_RespawnList.end();) {
+            RespawnData* rd = *it;
             if (rd->pspawnCDA->GetShipID() == shipID) {
-                delete(rd->pspawnCDA);
-                m_RespawnList.remove(rd);
-            }
+                delete rd->pspawnCDA;
+                delete rd;
+                it = m_RespawnList.erase(it);
+            } else ++it;
+        }
     }
 
     //------------------------------------------------------------------------------
@@ -333,8 +361,7 @@ namespace Training
     //------------------------------------------------------------------------------
     void        TrainingMission::SetChatCondition (Condition* pChatCondition)
     {
-        if (m_pChatCondition)
-            delete m_pChatCondition;
+        // The goal tree owns this condition; registration only observes it.
         m_pChatCondition = pChatCondition;
     }
 
@@ -347,12 +374,12 @@ namespace Training
             case TK_PauseTM:
             {
                 // if the game is paused
-                if (Time::IsPaused ())
+                if (Clock::IsPaused ())
                     // resume play
-                    Time::Continue ();
+                    Clock::Continue ();
                 else
                     // otherwise pause it
-                    Time::Pause ();
+                    Clock::Pause ();
             }
             break;
 
@@ -415,7 +442,8 @@ namespace Training
     //------------------------------------------------------------------------------
     void        TrainingMission::AddKeyCondition (Condition* pKeyCondition)
     {
-        m_KeyConditionList.push_front (pKeyCondition);
+        if (std::find(m_KeyConditionList.begin(), m_KeyConditionList.end(), pKeyCondition) == m_KeyConditionList.end())
+            m_KeyConditionList.push_front (pKeyCondition);
     }
 
     //------------------------------------------------------------------------------
@@ -430,6 +458,11 @@ namespace Training
         // fetch a few needed variables
         IshipIGC*               pShip = trekClient.GetShip ();
         TrekWindow*             pWindow = GetWindow ();
+
+        // Projectiles retain their launcher after it leaves the mission. Its
+        // collision state has been released, so use the no-launcher framing.
+        if (pLauncher && !pLauncher->GetMission ())
+            pLauncher = NULL;
 
         // save the current status of the ship and camera
         m_deadViewMode = pWindow->GetViewMode ();
@@ -454,14 +487,14 @@ namespace Training
             // it won't die immediately upon returning. To that end, we move the ship away from
             // whatever it collided with, and adjust its velocity accordingly
             Vector      shipPosition = pShip->GetPosition ();
-            Vector      launcherPosition = pLauncher->GetPosition ();
+            Vector      launcherPosition = pLauncher ? pLauncher->GetPosition () : shipPosition;
             Vector      delta = shipPosition - launcherPosition;
             float       fDeltaLength = delta.Length ();
-            Vector      deltaUnit = delta / fDeltaLength;
+            Vector      deltaUnit = fDeltaLength > 0.00001f ? delta / fDeltaLength : pShip->GetOrientation().GetBackward();
             float       fNewVelocity = (pShip->GetVelocity ().Length () * 0.5f);
             Vector      newVelocity = deltaUnit * fNewVelocity;
             //Increase distance moved. Used to be 1.5f here, not 15f.
-            float       fNewSeparation = 1.5f * (pShip->GetRadius () + pLauncher->GetRadius ());
+            float       fNewSeparation = 1.5f * (pShip->GetRadius () + (pLauncher ? pLauncher->GetRadius () : 0.0f));
             if (fNewSeparation > fDeltaLength)
                 pShip->SetPosition (launcherPosition + (deltaUnit * fNewSeparation));
             pShip->SetVelocity (newVelocity);
@@ -505,7 +538,11 @@ namespace Training
         }
 
         // wait for the override camera to end (wintrek.cpp, in OverrideCamera - time is 5 seconds or 3 seconds)
-        AddWaitCondition (new ElapsedTimeCondition (5.0f));
+        Condition* delay = new ElapsedTimeCondition (5.0f);
+        // Wait conditions are evaluated directly. Initialize the counter and
+        // period clock before registration, just as Goal::Start does.
+        delay->Start ();
+        AddWaitCondition (delay);
 
         // always return true
         return true;
@@ -549,15 +586,9 @@ namespace Training
                 trekClient.PostText(true, "Your side's stations have all been destroyed!");
                 debugf("Your side's stations have all been destroyed!\n");
 
-                //End training in 4 seconds
-                // clean up the wait conditions
-                std::list<Condition*>::iterator pWaitConditionIterator = m_WaitConditionList.begin();
-                std::list<Condition*>::iterator end = m_WaitConditionList.end();
-                while (pWaitConditionIterator != end)
-                    delete (*pWaitConditionIterator++);
-                // add new wait condition
-                m_pCondition = new Goal(new ElapsedTimeCondition(4.0f));
-                m_pCondition->Start();
+                // End training in four seconds. Frame retires the current tree
+                // after any action that delivered this callback has returned.
+                m_endAfterStationLoss = true;
             }
         }
     }
@@ -587,7 +618,7 @@ namespace Training
     //------------------------------------------------------------------------------
     IshipIGC*   TrainingMission::CreateDrone (const ZString& name, ShipID shipID, HullID hullID, SideID sideID, PilotType pilotType)
     {
-        DataShipIGC     dataShip;
+        DataShipIGC     dataShip{};
         ImissionIGC*    pMission = trekClient.GetCore ();
 
         // generate a ship ID if we need to
@@ -673,7 +704,7 @@ namespace Training
                 { 50.0f / 255.0f, 140.0f / 255.0f,  20.0f / 255.0f }, //icky yellow
                 { 255.0f / 255.0f, 145.0f / 255.0f, 145.0f / 255.0f }, //icky orange
                 { 50.0f / 255.0f, 200.0f / 255.0f, 125.0f / 255.0f } };//icky magenta1*/
-        static const char*  szSideNames[c_cSidesMax] =
+        const char*  szSideNames[c_cSidesMax] =
                             {
                                 "Iron League",
                                 "Bios",
@@ -682,7 +713,7 @@ namespace Training
                                 "Colossal Mining Corp",
                                 "Midnight Runners"
                             };
-        static CivID        civs[c_cSidesMax] = {25, 35, 18, 25, 35, 18};
+        CivID        civs[c_cSidesMax] = {25, 35, 18, 25, 35, 18};
 
         if (GetMissionID() == 8) //c_TM_8_Nanite
         {
@@ -713,7 +744,7 @@ namespace Training
         for (SideID sid = 0; sid < c_cSidesMax; sid++)
         {
             IcivilizationIGC*   pCiv = pCore->GetCivilization (civs[sid]);
-            DataSideIGC         ds;
+            DataSideIGC         ds{};
  
             ds.nFlags = 0;
             ds.sideID = sid;
@@ -741,6 +772,9 @@ namespace Training
             pSide->Release ();
         }
 
+#ifdef ALLEGIANCE_NATIVE
+        trekClient.SetMissionParameters(szTrainingCoreFilename, iStaticCoreVersion);
+#else
         // create the mission def
         FMD_S_MISSIONDEF    fmMissionDef;
         fmMissionDef.szDescription[0] = 0;
@@ -768,6 +802,8 @@ namespace Training
         ZAssert (pMissionInfo);
         pMissionInfo->Update (&fmMissionDef);
         trekClient.GetClientEventSource ()->OnAddMission (pMissionInfo);
+
+#endif
 
         // get the player ship
         IshipIGC*       pShip = trekClient.GetShip ();
@@ -856,6 +892,9 @@ namespace Training
     //------------------------------------------------------------------------------
     void        TrainingMission::CreatePlayerInfo (IshipIGC* pShip, SideID side, ShipID shipID)
     {
+#ifdef ALLEGIANCE_NATIVE
+        trekClient.RegisterPilot(pShip, side, shipID);
+#else
         ImissionIGC*        pMission = trekClient.GetCore ();
 
         // check that the side is set correctly
@@ -890,6 +929,7 @@ namespace Training
         // join the mission and side
         trekClient.AddPlayerToMission (pPlayerInfo);
         trekClient.AddPlayerToSide (pPlayerInfo, side);
+#endif
     }
 
     //------------------------------------------------------------------------------

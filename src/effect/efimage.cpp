@@ -1,4 +1,5 @@
 #include "efimage.h"
+#include "../ClientCore/MouseJoystick.h"
 
 #include <alloc.h>
 #include <font.h>
@@ -188,20 +189,10 @@ public:
                 float dx = (pointMouse.X() - 320) * m_sensitivity;
                 float dy = (pointMouse.Y() - 240) * m_sensitivity;
 
-                Point 
-                    point(
-                        m_ppnumber[0]->GetValue() - dx, 
-                        m_ppnumber[1]->GetValue() - dy
-                    );
-
-                float length = point.Length();
-
-                if (length > 1) {
-                    point = point / length;
-                }
-                
-                m_ppnumber[0]->SetValue(point.X());
-                m_ppnumber[1]->SetValue(point.Y());
+                float x = m_ppnumber[0]->GetValue(), y = m_ppnumber[1]->GetValue();
+                Allegiance::AccumulateMouseJoystick(x, y, dx, dy, 1);
+                m_ppnumber[0]->SetValue(x);
+                m_ppnumber[1]->SetValue(y);
             }
 
             pprovider->SetCursorPos(Point(320, 240));

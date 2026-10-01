@@ -378,8 +378,13 @@ void CstationIGC::Launch(IshipIGC* pship)
     pship->SetCurrentTurnRate(c_axisRoll, 0.0f);
 
     pship->SetCluster(pcluster);
+#ifdef ALLEGIANCE_NATIVE
+    pship->SetLastTimeLaunched(pcluster->GetLastUpdate());
+    SetLastLaunch(pcluster->GetLastUpdate());
+#else
 	pship->SetLastTimeLaunched(Time::Now());
 	SetLastLaunch(Time::Now());
+#endif
 }
 
 bool    CstationIGC::InGarage(IshipIGC* pship, const Vector& position)

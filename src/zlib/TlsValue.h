@@ -23,28 +23,40 @@ class TlsValue
 {
 // Construction / Destruction
 public:
-  TlsValue(void)                         // Default Constructor (does nothing)
+  TlsValue(void) : m_dwSlot(0)
   {
   }
-  TlsValue(const TlsValue& that)         // Copy Constructor
+  TlsValue(const TlsValue& that) : m_dwSlot(0) // Copy Constructor
   {
     SetValue(that.GetValue());   
   }
   ~TlsValue()
   {
+    #ifdef _WIN32
     TlsFree(m_dwSlot);
+#else
+    if (m_dwSlot) pthread_key_delete(m_dwSlot - 1);
+#endif
   }
 
 // Attributes
 public:
   T GetValue() const
   {
+    #ifdef _WIN32
     return reinterpret_cast<T>(TlsGetValue(const_cast<TlsValue*> (this)->GetSlot()));
+#else
+    return static_cast<T>(reinterpret_cast<uintptr_t>(pthread_getspecific(const_cast<TlsValue*>(this)->GetSlot() - 1)));
+#endif
   }
 
   T SetValue(const T& value)
   {
+    #ifdef _WIN32
     TlsSetValue(GetSlot(), reinterpret_cast<PVOID>(value));
+#else
+    pthread_setspecific(GetSlot() - 1, reinterpret_cast<void*>(static_cast<uintptr_t>(value)));
+#endif
     return value;
   }
 
@@ -181,12 +193,18 @@ protected:
 
     if (!m_dwSlot)               // Check (again) for uninitialized slot
     {
+#ifdef _WIN32
       m_dwSlot = TlsAlloc();     // Allocate a TLS slot
       if (!m_dwSlot)             // Zero is valid, but not for us since zero
       {                          //   is used to indicate not-initialized
         m_dwSlot = TlsAlloc();   // Next index will not be zero
         TlsFree(0);              // Free the zero index
       }
+#else
+      pthread_key_t key;
+      if (pthread_key_create(&key, nullptr)) std::abort();
+      m_dwSlot = key + 1;
+#endif
     }
     GetSyncObject().Unlock();    // Unlock the sync object
     return m_dwSlot;             // Return the (non-zero) slot

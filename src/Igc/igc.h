@@ -22,6 +22,7 @@
 #include <quaternion.h>
 #include <tref.h>
 #include <vector.h>
+#include "../ClientCore/MissionConfiguration.h"
 
 const float c_fPedestalOffset = 2000.0f;
 const float c_fFlagOffset = 50.0f;
@@ -221,257 +222,15 @@ typedef short VisualEffectID;
 
 const ForceEffectID effectJiggle = 0;
 
-typedef short  TrekKey;
+#include "TrekKeys.h"
 
-const TrekKey TK_NoKeyMapping               = -1;  // Key not mapped to anything
-const TrekKey TK_NextCommMsg                = 0;   // Scroll focus to next chat message in buffer
-const TrekKey TK_PrevCommMsg                = 1;   // Scroll focus to previous chat message in buffer
-const TrekKey TK_PrevWeapon                 = 2;   // Select the previous weapon from inventory
-const TrekKey TK_NextWeapon                 = 3;   // Select the next weapon from inventory
-const TrekKey TK_ToggleGroupFire            = 4;   // Toggle all weapons firing together
-const TrekKey TK_PrevPart                   = 5;   // Select the previous part from inventory
-const TrekKey TK_NextPart                   = 6;   // Select the next part from inventory
-const TrekKey TK_MountPart                  = 7;   // Mount the selected part
-const TrekKey TK_ReplacePart                = 8;   // Replace the selected part
-const TrekKey TK_UnmountPart                = 9;   // Unmount the selected part
-const TrekKey TK_DropPart                   = 10;  // Drop the selected part
-const TrekKey TK_ZoomOut                    = 11;  // Zoom out
-const TrekKey TK_ZoomIn                     = 12;  // Zoom in
-const TrekKey TK_PitchUp                    = 17;  // Turn the nose of the ship up
-const TrekKey TK_PitchDown                  = 18;  // Turn the nose of the ship down
-const TrekKey TK_YawLeft                    = 19;  // Turn the nose of the ship left
-const TrekKey TK_YawRight                   = 20;  // Turn the nose of the ship right
-const TrekKey TK_RollLeft                   = 21;  // Roll the ship to the left
-const TrekKey TK_RollRight                  = 22;  // Roll the ship to the right
-const TrekKey TK_FOVOut                     = 23;  // Adjust frame-of-view wider
-const TrekKey TK_FOVIn                      = 24;  // Adjust frame-of-view narrower
-const TrekKey TK_MainMenu                   = 25;  // View the main menu
-const TrekKey TK_ViewFrontLeft              = 26;  // Look forward to the left
-const TrekKey TK_ViewFrontRight             = 27;  // Look forward to the right
-const TrekKey TK_ViewLeft                   = 28;  // Look to the left
-const TrekKey TK_ViewRight                  = 29;  // Look to the right
-const TrekKey TK_ViewExternal               = 30;  // View the ship from outside
-const TrekKey TK_ViewFlyby                  = 31;  // View an animated flyby of the ship
-const TrekKey TK_ViewMissile                = 32;  // View from the missile camera
-const TrekKey TK_ViewTarget                 = 33;  // View the targeted item
-const TrekKey TK_ViewChase                  = 34;  // View the ship from a chase position
-const TrekKey TK_ViewTurret                 = 35;  // View from the ship's turret
-const TrekKey TK_ViewBase                   = 36;  // View from the base
-const TrekKey TK_ViewSector                 = 37;  // View the sector map
-const TrekKey TK_ViewCommand                = 38;  // Display a tactical view of the sector
-const TrekKey TK_CycleChatMsgs              = 39;  // Currently does nothing
-const TrekKey TK_AcceptCommand              = 40;  // Accept pending command
-const TrekKey TK_ClearCommand               = 41;  // Clear current command
-const TrekKey TK_RejectCommand              = 42;  // current target == current command
-const TrekKey TK_ToggleAutoPilot            = 43;  // Activate autopilot
-const TrekKey TK_ThrustLeft                 = 44;  // Apply thrust to cause ship to move left
-const TrekKey TK_ThrustRight                = 45;  // Apply thrust to cause ship to move right
-const TrekKey TK_ThrustUp                   = 46;  // Apply thrust to cause ship to move up
-const TrekKey TK_ThrustDown                 = 47;  // Apply thrust to cause ship to move down
-const TrekKey TK_ThrustForward              = 48;  // Apply thrust to cause ship to move forward
-const TrekKey TK_ThrustBackward             = 49;  // Apply thrust to cause ship to move backward
-const TrekKey TK_FireBooster                = 50;  // Fire booster rockets
-const TrekKey TK_ConModeGameState           = 51;  // Game State Console Mode
-const TrekKey TK_QuickChatMenu              = 52;  // Bring up quick chat menu
-const TrekKey TK_ToggleLODSlider            = 53;  // Toggle the LOD Slider
-const TrekKey TK_StartChat                  = 54;  // Start a chat message
-const TrekKey TK_FireWeapon                 = 55;  // Fire the selected weapon
-const TrekKey TK_FireMissile                = 56;  // Fire the selected missile
-const TrekKey TK_LockVector                 = 57;  // Lock the current heading and speed
-const TrekKey TK_ThrottleUp                 = 58;  // Increase the ship speed
-const TrekKey TK_ThrottleDown               = 59;  // Decrease the ship speed
-const TrekKey TK_ThrottleZero               = 60;  // Shut down engine
-const TrekKey TK_Throttle33                 = 61;  // Throttle at one-third
-const TrekKey TK_Throttle66                 = 62;  // Throttle at two-thirds
-const TrekKey TK_ThrottleFull               = 63;  // Throttle at full
-const TrekKey TK_ToggleBooster              = 64;  // Toggle booster rocket on/off
-const TrekKey TK_LODUp                      = 65;  // Move the LOD scale higher
-const TrekKey TK_LODDown                    = 66;  // Move the LOD scale lower
-const TrekKey TK_ConModeCombat              = 67;  // Sets console mode to combat
-const TrekKey TK_ConModeCommand             = 68;  // Sets console mode to command view
-const TrekKey TK_ConModeNav                 = 69;  // Sets console mode to navigation
-const TrekKey TK_ConModeInventory           = 70;  // Sets console mode to inventory
-const TrekKey TK_ConModeInvest              = 71;  // Sets console mode to investments
-const TrekKey TK_ConModeTeam                = 72;  // Sets console mode to the team pane
-const TrekKey TK_ViewRear                   = 73;  // Sets the camera to point directly back
-const TrekKey TK_Target                     = 74;  // Target next object (any type)
-const TrekKey TK_TargetNearest              = 75;  // Target nearest object (any type)
-const TrekKey TK_TargetPrev                 = 76;  // Target previous object (any type)
-const TrekKey TK_TargetFriendly             = 77;  // Target next friendly ship
-const TrekKey TK_TargetFriendlyNearest      = 78;  // Target nearest friendly ship
-const TrekKey TK_TargetFriendlyPrev         = 79;  // Target previous friendly ship
-const TrekKey TK_TargetEnemy                = 80;  // Target next enemy ship
-const TrekKey TK_TargetEnemyNearest         = 81;  // Target nearest enemy ship
-const TrekKey TK_TargetEnemyPrev            = 82;  // Target previous enemy ship
-const TrekKey TK_TargetEnemyBase            = 83;  // Targets the nearest enemy base
-const TrekKey TK_TargetEnemyBaseNearest     = 84;  // Targets the nearest (any) object
-const TrekKey TK_TargetEnemyBasePrev        = 85;  // Targets the nearest enemy ship
-const TrekKey TK_TargetFriendlyBase         = 86;  // Targets the nearest friendly ship
-const TrekKey TK_TargetFriendlyBaseNearest  = 87;  // Targets the nearest object within a cone ahead
-const TrekKey TK_TargetFriendlyBasePrev     = 88;  // Target previous friendly base
-const TrekKey TK_TargetCommand              = 89;  // Target the object of current command
-const TrekKey TK_TargetCenter               = 90;  // Target ship straight ahead
-const TrekKey TK_TargetHostile              = 91;  // Target the ship causing most recent damage
-const TrekKey TK_Suicide                    = 92;  // Kill yourself
-const TrekKey TK_ToggleGrid                 = 93;  // Toggle visible grid in combat view
-const TrekKey TK_ToggleCloak                = 94;  // Toggle cloaking
-const TrekKey TK_DropMine                   = 95;  // Drop a minefield
-const TrekKey TK_Ripcord                    = 96;  // Ripcord
-const TrekKey TK_ViewRearLeft               = 97;  // Look back and to the left
-const TrekKey TK_ViewRearRight              = 99;  // Look back and to the right
-const TrekKey TK_Obsolete1                  = 99;  // Not used - feel free to reuse
-const TrekKey TK_TargetSelf                 =100;  // Target myself
-const TrekKey TK_ToggleCollisions	        =101;  // Toggle collision detection
-const TrekKey TK_OccupyNextTurret           =102;  // Occupy the next available turret position
-const TrekKey TK_TargetNothing              =103;  // Reset target so that nothing is targeted
-const TrekKey TK_MatchSpeed                 =104;  // Match speed with target
-const TrekKey TK_ChatPageUp                 =105;  // Scroll the chat pane one page up
-const TrekKey TK_ChatPageDown               =106;  // Scroll the chat pane one page down
-const TrekKey TK_ViewExternalOrbit          =107;  // Orbit the camera around the ship
-const TrekKey TK_ViewExternalStation        =108;  // Have the camera face the station through the ship
-const TrekKey TK_QuickChat1                 =109;  // Send quick chat 1
-const TrekKey TK_QuickChat2                 =110;  // Send quick chat 2
-const TrekKey TK_QuickChat3                 =111;  // Send quick chat 3
-const TrekKey TK_QuickChat4                 =112;  // Send quick chat 4
-const TrekKey TK_QuickChat5                 =113;  // Send quick chat 5
-const TrekKey TK_QuickChat6                 =114;  // Send quick chat 6
-const TrekKey TK_QuickChat7                 =115;  // Send quick chat 7
-const TrekKey TK_QuickChat8                 =116;  // Send quick chat 8
-const TrekKey TK_QuickChat9                 =117;  // Send quick chat 9
-const TrekKey TK_QuickChat0                 =118;  // Send quick chat 10
-const TrekKey TK_DebugTest1                 = 119; // DebugTest1
-const TrekKey TK_DebugTest2                 = 120; // DebugTest2
-const TrekKey TK_DebugTest3                 = 121; // DebugTest3
-const TrekKey TK_DebugTest4                 = 122; // DebugTest4
-const TrekKey TK_DebugTest5                 = 123; // DebugTest5
-const TrekKey TK_DebugTest6                 = 124; // DebugTest6
-const TrekKey TK_DebugTest7                 = 125; // DebugTest7
-const TrekKey TK_DebugTest8                 = 126; // DebugTest8
-const TrekKey TK_DebugTest9                 = 127; // DebugTest9
-const TrekKey TK_DropChaff                  = 128; // Drop Chaff
-const TrekKey TK_ToggleCommand              = 129; // Toggle command mode 3/4 vs. top down
-const TrekKey TK_SwapWeapon1                = 130; // Swap the current weapon with cargo
-const TrekKey TK_SwapWeapon2                = 131; // Swap the current weapon with cargo
-const TrekKey TK_SwapWeapon3                = 132; // Swap the current weapon with cargo
-const TrekKey TK_SwapWeapon4                = 133; // Swap the current weapon with cargo
-const TrekKey TK_SwapTurret1                = 134; // Swap the current weapon with cargo
-const TrekKey TK_SwapTurret2                = 135; // Swap the current weapon with cargo
-const TrekKey TK_SwapTurret3                = 136; // Swap the current weapon with cargo
-const TrekKey TK_SwapTurret4                = 137; // Swap the current weapon with cargo
-const TrekKey TK_SwapMissile                = 138; // Swap the current item with cargo
-const TrekKey TK_SwapChaff                  = 139; // Swap the current item with cargo
-const TrekKey TK_SwapShield                 = 140; // Swap the current item with cargo
-const TrekKey TK_SwapCloak                  = 141; // Swap the current item with cargo
-const TrekKey TK_SwapAfterburner            = 142; // Swap the current item with cargo
-const TrekKey TK_SwapMine                   = 143; // Swap the current item with cargo
-const TrekKey TK_NextCargo                  = 144; // Rotate the selected cargo item
-const TrekKey TK_ToggleWeapon1              = 145; // select the weapon for singe fire or group fire
-const TrekKey TK_ToggleWeapon2              = 146; // select the weapon for singe fire or group fire
-const TrekKey TK_ToggleWeapon3              = 147; // select the weapon for singe fire or group fire
-const TrekKey TK_ToggleWeapon4              = 148; // select the weapon for singe fire or group fire
-const TrekKey TK_DropCargo                  = 154; // drop the current cargo item
-const TrekKey TK_Reload                     = 155;
-const TrekKey TK_ExecuteCommand             = 156; // accept and activate autopilot
-const TrekKey TK_PauseTM                    = 157; // pause training missions
-
-const TrekKey TK_TargetEnemyBomber          = 158;
-const TrekKey TK_TargetEnemyFighter         = 159;
-const TrekKey TK_TargetEnemyConstructor     = 160;
-const TrekKey TK_TargetEnemyMiner           = 161;
-const TrekKey TK_TargetEnemyMajorBase       = 162;
-const TrekKey TK_TargetFriendlyBomber       = 163;
-const TrekKey TK_TargetFriendlyFighter      = 164;
-const TrekKey TK_TargetFriendlyConstructor  = 165;
-const TrekKey TK_TargetFriendlyMiner        = 166;
-const TrekKey TK_TargetFriendlyLifepod      = 167;
-const TrekKey TK_TargetFriendlyMajorBase    = 168;
-const TrekKey TK_TargetFlag                 = 169;
-const TrekKey TK_TargetArtifact             = 170;
-
-const TrekKey TK_TargetEnemyBomberNearest          = 171;
-const TrekKey TK_TargetEnemyFighterNearest         = 172;
-const TrekKey TK_TargetEnemyConstructorNearest     = 173;
-const TrekKey TK_TargetEnemyMinerNearest           = 174;
-const TrekKey TK_TargetEnemyMajorBaseNearest       = 175;
-const TrekKey TK_TargetFriendlyBomberNearest       = 176;
-const TrekKey TK_TargetFriendlyFighterNearest      = 177;
-const TrekKey TK_TargetFriendlyConstructorNearest  = 178;
-const TrekKey TK_TargetFriendlyMinerNearest        = 179;
-const TrekKey TK_TargetFriendlyLifepodNearest      = 180;
-const TrekKey TK_TargetFriendlyMajorBaseNearest    = 181;
-const TrekKey TK_TargetFlagNearest                 = 182;
-const TrekKey TK_TargetArtifactNearest             = 183;
-
-const TrekKey TK_TargetEnemyBomberPrev          = 184;
-const TrekKey TK_TargetEnemyFighterPrev         = 185;
-const TrekKey TK_TargetEnemyConstructorPrev     = 186;
-const TrekKey TK_TargetEnemyMinerPrev           = 187;
-const TrekKey TK_TargetEnemyMajorBasePrev       = 188;
-const TrekKey TK_TargetFriendlyBomberPrev       = 189;
-const TrekKey TK_TargetFriendlyFighterPrev      = 190;
-const TrekKey TK_TargetFriendlyConstructorPrev  = 191;
-const TrekKey TK_TargetFriendlyMinerPrev        = 192;
-const TrekKey TK_TargetFriendlyLifepodPrev      = 193;
-const TrekKey TK_TargetFriendlyMajorBasePrev    = 194;
-const TrekKey TK_TargetFlagPrev                 = 195;
-const TrekKey TK_TargetArtifactPrev             = 196;
-
-const TrekKey TK_TargetWarp                     = 197;
-const TrekKey TK_TargetWarpNearest              = 198;
-const TrekKey TK_TargetWarpPrev                 = 199;
-
-// debugging keys
-const TrekKey TK_SkipTMGoal                     = 200; // skip a training mission goal
-const TrekKey TK_IncreaseTMClockSpeed           = 201; // increase clock speed in training missions
-const TrekKey TK_DecreaseTMClockSpeed           = 202; // decrease clock speed in training missions
-const TrekKey TK_ResetTMClockSpeed              = 203; // reset clock speed in training missions
-const TrekKey TK_Help                           = 204; // help
-
-const TrekKey TK_CycleRadar                     = 205; // help
-const TrekKey TK_ConModeMiniTeam                = 206; // Sets console mode to the mini-team pane
-
-const TrekKey TK_CommandFinishTM                = 207;
-const TrekKey TK_RollModifier                   = 208;
-const TrekKey TK_TrackCommandView               = 209;
-const TrekKey TK_ConModeTeleport                = 210;
-const TrekKey TK_ToggleMouse                    = 211;
-const TrekKey TK_PromoteTurret1                 = 212; // Swap the current weapon with cargo
-const TrekKey TK_PromoteTurret2                 = 213; // Swap the current weapon with cargo
-const TrekKey TK_PromoteTurret3                 = 214; // Swap the current weapon with cargo
-const TrekKey TK_PromoteTurret4                 = 215; // Swap the current weapon with cargo
-const TrekKey TK_VoteYes                        = 216; // Vote Yes on the current issue
-const TrekKey TK_VoteNo                         = 217; // Vote No on the current issue
-
-const TrekKey TK_ScrnShot                       = 218; // Take a screen shot
-
-const TrekKey TK_TargetAlliedBase				= 219; //Imago 8/1/09
-const TrekKey TK_TargetAlliedBaseNearest		= 220;
-const TrekKey TK_TargetAlliedBasePrev			= 221;
-
-const TrekKey TK_Max                            = 222; // Must be last trekkey
-
-typedef short   SoundID;
-typedef short   VoiceID;
-
-#define DEFSOUND(id) id##Sound,
-
-//removed sounds should still create an entry in the enum
-#define DEFEMPTYSOUND(id) id##Sound,
-enum {
-    lastDynamicSound = 1000,
-#include "sounds.h"
-};
-#undef DEFSOUND
-
-//further mentions of DEFEMPTYSOUND should do nothing
-#undef DEFEMPTYSOUND
-#define DEFEMPTYSOUND(id)
+#include "../ClientCore/SoundIds.h"
 
 //Redefined data types (so we can change them later)
 const int NA = -1; // meaning unspecified, none, or all.
 const float fNA = -1; // To support supression of compiler warnings.  Floats should probably all be doubles anyways, but hey.  --Dhauzimmer, 8/14/04
 
-typedef long            MissionID;
+typedef LONG            MissionID; // Windows-width ID on every platform
 
 //*ID are unique IDs for something
 typedef short           ObjectID;
@@ -1347,14 +1106,8 @@ public:
             {
                 return "Maximum number of players must be between 1 and 100.";
             }
-            else if (IsNoWinningConditionsGame())
-            {
-                return "You must choose one or more winning conditions.";
-            }
-			else if (bAutoRestart || (bObjectModelCreated && bClubGame)) // KGJV #62 || bAllowEmptyTeams)
-            {
-                return "HACK: one or more admin-only flags are set.";
-            }
+            if (const char* reason = Allegiance::MissionClientFlagsError(IsNoWinningConditionsGame(), bAutoRestart, bObjectModelCreated && bClubGame))
+                return reason;
         }
 
         if (nInitialMinersPerTeam > nMaxDronesPerTeam)
@@ -1828,6 +1581,13 @@ struct  DataPartTypeIGC : public DataBuyableIGC
     EquipmentType       equipmentType;
     PartMask            partMask;
     char                inventoryLineMDL[c_cbFileName];
+#ifdef ALLEGIANCE_NATIVE
+    // MSVC reserves these tail bytes in DataPartTypeIGC. The Itanium C++ ABI
+    // otherwise reuses them for DataPackTypeIGC::packType/amount, misreading
+    // Windows .igc files (pack type at 396, amount at 398, record size 400).
+    // Other derived part records begin with floats and already start at 396.
+    unsigned char       nativePartTailPadding[3];
+#endif
 };
 
 struct  DataWeaponTypeIGC : public DataPartTypeIGC
@@ -2183,7 +1943,7 @@ class   CompactTime          //2 bytes
     public:
         void        Set(Time  timeBase, Time  timeNow)
         {
-            long    delta = (long)(timeBase.clock() - timeNow.clock());
+            int32_t delta = int32_t(timeBase.clock() - timeNow.clock());
             m_timeOffset = (short)delta;
 
             assert (m_timeOffset == delta);
@@ -2191,7 +1951,7 @@ class   CompactTime          //2 bytes
 
         void        Export(Time   timeBase, Time* timeNow)  const
         {
-            *timeNow = (DWORD)((long)(timeBase.clock()) - (long)m_timeOffset);
+            *timeNow = timeBase.clock() - uint32_t(int32_t(m_timeOffset));
         }
 };
 
@@ -2843,6 +2603,10 @@ class ImissionIGC : public IstaticIGC
                                                      const void* data, int dataSize) = 0;
 
         virtual ImodelIGC*              GetModel(ObjectType type, ObjectID id) const = 0;
+#ifdef ALLEGIANCE_NATIVE
+        virtual void NativeAddMissile(ImissileIGC*) = 0;
+        virtual void NativeDeleteMissile(ImissileIGC*) = 0;
+#endif
         virtual IbaseIGC*               GetBase(ObjectType type, ObjectID id) const = 0;
 
         virtual DamageTrack*            CreateDamageTrack(void) = 0;
@@ -2903,6 +2667,9 @@ class ImissionIGC : public IstaticIGC
 
         virtual BuoyID                  GenerateNewBuoyID(void) = 0;
         virtual ShipID                  GenerateNewShipID(void) = 0;
+#ifdef ALLEGIANCE_NATIVE
+        virtual void RekeyShipID(ShipID oldID,ShipID newID) = 0;
+#endif
         virtual AsteroidID              GenerateNewAsteroidID(void) = 0;
         virtual StationID               GenerateNewStationID(void) = 0;
         virtual TreasureID              GenerateNewTreasureID(void) = 0;
@@ -2947,6 +2714,10 @@ class ImissionIGC : public IstaticIGC
 class IbaseIGC : public IObject
 {
     public:
+#ifdef ALLEGIANCE_NATIVE
+        // Cached static types may outlive the mission that loaded them.
+        virtual void NativeSetStaticOwner(ImissionIGC*) { assert(false); }
+#endif
         virtual HRESULT         Initialize(ImissionIGC* pMission, Time now, const void* data, int length) = 0;
         virtual void            Terminate(void) = 0;
         virtual void            Update(Time   now)          {}
@@ -4040,6 +3811,12 @@ class IclusterIGC : public IbaseIGC
         virtual const ModelListIGC*     GetModels(void) const = 0;
 
         virtual const ModelListIGC*     GetPickableModels(void) const = 0;
+#ifdef ALLEGIANCE_NATIVE
+        virtual const std::vector<ImodelIGC*>* GetDodgeCandidates(IshipIGC* ship,float tMax,bool shipsOnly=false) = 0;
+        virtual void InvalidateDodgeIndex() = 0;
+        virtual void RequireFullVisibilityScan() = 0;
+        virtual const std::vector<ImodelIGC*>* GetPathCandidates(IshipIGC* ship,const Vector& goal,float margin) = 0;
+#endif
 
         virtual void                    AddWarp(IwarpIGC* warpNew) = 0;
         virtual void                    DeleteWarp(IwarpIGC* warpOld) = 0;
@@ -4528,6 +4305,14 @@ class ClusterSite : public AttachSite
         virtual void                    AddScanner(SideID   sid, IscannerIGC* scannerNew) {}
         virtual void                    DeleteScanner(SideID   sid, IscannerIGC* scannerOld) {}
         virtual const ScannerListIGC*   GetScanners(SideID   sid) const { return NULL; }
+#ifdef ALLEGIANCE_NATIVE
+        virtual void BeginVisibilityScan() {}
+        virtual void EndVisibilityScan() {}
+        virtual void InvalidateVisibilityIndex() {}
+        virtual IscannerIGC* FindScanner(SideID side,ImodelIGC* model) {
+            if(auto* list=GetScanners(side))for(auto* l=list->first();l;l=l->next())if(l->data()->InScannerRange(model))return l->data();return nullptr;
+        }
+#endif
 
         virtual AssetMask               GetClusterAssetMask(void) { return 0; }
         virtual void                    SetClusterAssetMask(AssetMask am) {}
@@ -4757,6 +4542,12 @@ enum BucketChange
 class IIgcSite : public IObject
 {
     public:
+#ifdef ALLEGIANCE_NATIVE
+        virtual int NativePredictionMode() const { return 0; }
+        virtual uint64_t NativeShot(IshipIGC*,Mount,uint32_t) { return 0; }
+        virtual bool NativeShotExists(uint64_t) const { return false; }
+        virtual void NativeProjectileCreated(ImodelIGC*,uint64_t) {}
+#endif
         virtual Time ServerTimeFromClientTime(Time   timeClient)
         {
             return timeClient;
@@ -5001,6 +4792,11 @@ class   DamageBucket
             return m_model;
         }
 
+        DamageTrack* track(void) const
+        {
+            return m_track;
+        }
+
         float       totalDamage(void) const
         {
             return m_totalDamage;
@@ -5154,7 +4950,7 @@ inline void        DeleteIbaseIGC(BaseListIGC*     list, IbaseIGC* base)
 		debugf("ERROR: IGC::DeleteIbaseIGC() - base was null.\n");
 		return;
 	}
-#ifndef __GNUC__
+#if !defined(__GNUC__) && !defined(ALLEGIANCE_NATIVE)
 	__try
 	{
 #endif
@@ -5169,7 +4965,7 @@ inline void        DeleteIbaseIGC(BaseListIGC*     list, IbaseIGC* base)
 				break;                  //all done
 			}
 		}
-#ifndef __GNUC__
+#if !defined(__GNUC__) && !defined(ALLEGIANCE_NATIVE)
     }
 	__except (StackTracer::ExceptionFilter(GetExceptionInformation()))
 	{

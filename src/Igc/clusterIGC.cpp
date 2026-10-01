@@ -21,6 +21,10 @@
 #include "modelIGC.h"
 #include <stdlib.h>
 #include <math.h>
+#ifdef ALLEGIANCE_NATIVE
+#include <chrono>
+#include "projectileIGC.h"
+#endif
 
 /////////////////////////////////////////////////////////////////////////////
 // CclusterIGC
@@ -98,6 +102,12 @@ void        CclusterIGC::Update(Time now)
 {
     if (now > m_lastUpdate)
     {
+#ifdef ALLEGIANCE_NATIVE
+        m_nativeProfile.fill(0);
+        auto stamp=std::chrono::steady_clock::now();
+        auto phase=[&](int id){auto next=std::chrono::steady_clock::now();m_nativeProfile[id]+=std::chrono::duration<double,std::milli>(next-stamp).count();stamp=next;};
+        CompactNativeModels();
+#endif
         float   dt = now - m_lastUpdate;
 
         bool    bStarted = m_pMission->GetMissionStage() == STAGE_STARTED;
@@ -198,6 +208,10 @@ void        CclusterIGC::Update(Time now)
                 }
 
                 {
+#ifdef ALLEGIANCE_NATIVE
+                    phase(0);
+                    m_dodgeIndex.begin();m_shipDodgeIndex.begin();
+#endif
                     //Have all ships on autopilot plot their moves. Allow ships to suicide.
                     ShipLinkIGC*        lNext;
                     for (ShipLinkIGC*   l = m_ships.first();
@@ -209,6 +223,10 @@ void        CclusterIGC::Update(Time now)
 
                         s->PlotShipMove(now);
                     }
+#ifdef ALLEGIANCE_NATIVE
+                    m_dodgeIndex.end();m_shipDodgeIndex.end();
+                    phase(1);
+#endif
                 }
             }
 
@@ -230,6 +248,10 @@ void        CclusterIGC::Update(Time now)
         else
             m_fCost = 0.0f;
 
+#ifdef ALLEGIANCE_NATIVE
+        phase(2);
+#endif
+
         {
             //Call the update method on all the contained models
             //models might self-terminate in the update and nuke earlier models in the update loop
@@ -238,6 +260,15 @@ void        CclusterIGC::Update(Time now)
             //ObjectType  oldObjectType = NA;
             //ObjectType  newObjectType = NA;
 
+#ifdef ALLEGIANCE_NATIVE
+            // New models append and are ignored by this pass, like insertion
+            // at the head of the original list. Tombstones handle retirement
+            // of this model or another model while its Update runs.
+            for(size_t i=m_nativeModels.size();i>0;){--i;auto* model=m_nativeModels[i];if(!model)continue;
+                if(m_nativeModelTypes[i]==OT_projectile)static_cast<CprojectileIGC*>(model)->CprojectileIGC::Update(now);
+                else model->Update(now);
+            }
+#else
             ModelLinkIGC*       lNext;
             for (ModelLinkIGC*     l = m_models.first();
                  (l != NULL);
@@ -248,28 +279,49 @@ void        CclusterIGC::Update(Time now)
 
                 lNext = l->next();
 
-                l->data()->Update(now);
+                auto* model=l->data();
+                    model->Update(now);
             }
+#endif
         }
 
+#ifdef ALLEGIANCE_NATIVE
+        phase(3);
+#endif
         if (m_data.activeF && bStarted)
         {
             {
                 //Update the bounding boxes for all moving objects & projectiles
+#ifdef ALLEGIANCE_NATIVE
+                for(size_t i=m_nativeModels.size();i>0;){--i;auto* model=m_nativeModels[i];if(!model)continue;
+                    if(m_nativeModelTypes[i]==OT_projectile)static_cast<CprojectileIGC*>(model)->CprojectileIGC::SetBB(m_lastUpdate,now,dt);
+                    else model->SetBB(m_lastUpdate,now,dt);
+                }
+#else
                 for (ModelLinkIGC*     l = m_models.first();
                      (l != NULL);
                      l = l->next())
                 {
-                    l->data()->SetBB(m_lastUpdate, now, dt);
+                    auto* model=l->data();
+                        model->SetBB(m_lastUpdate,now,dt);
                 }
+#endif
 
                 m_tMax = dt;
             }
 
             m_kdrStatic.update();
             m_kdrMoving.update();
+#ifdef ALLEGIANCE_NATIVE
+            phase(4);
+#endif
 
             {
+                // Stage immutable ray boxes once; group traversal by node,
+                // then apply candidates in the original ray/static/moving order.
+#ifdef ALLEGIANCE_NATIVE
+                m_nativeRays.clear();
+#endif
                 //Cast rays through the KD tree for each object
                 for (ModelLinkIGC*     l = m_modelsCastRay.first();
                      (l != NULL);
@@ -277,16 +329,39 @@ void        CclusterIGC::Update(Time now)
                 {
                     ImodelIGC*  m = l->data();
 
-                    HitTest*    ht = m->GetHitTest();
+                    HitTest* ht;
+#ifdef ALLEGIANCE_NATIVE
+                    if(m->GetObjectType()==OT_projectile)
+                        ht=static_cast<CprojectileIGC*>(m)->CprojectileIGC::GetHitTest();
+                    else
+#endif
+                        ht=m->GetHitTest();
 
                     if (!ht->GetDeadF())
                     {
+#ifdef ALLEGIANCE_NATIVE
+                        m_nativeRays.push_back(KDroot::nativeCast(ht));
+#else
                         m_kdrStatic.test(ht, &m_collisions);
                         m_kdrMoving.test(ht, &m_collisions);
+#endif
                     }
                 }
+#ifdef ALLEGIANCE_NATIVE
+                m_kdrStatic.nativeBatch(m_nativeRays,m_nativeStaticCandidates);
+                m_kdrMoving.nativeBatch(m_nativeRays,m_nativeMovingCandidates);
+                for(size_t i=0;i<m_nativeRays.size();++i){
+                    m_kdrStatic.applyNativeBatch(m_nativeRays[i],m_nativeStaticCandidates,int(i),&m_collisions);
+                    m_kdrMoving.applyNativeBatch(m_nativeRays[i],m_nativeMovingCandidates,int(i),&m_collisions);
+                }
+                // Scratch retains capacity, never gameplay pointers across a phase.
+                m_nativeRays.clear();m_nativeStaticCandidates.clear();m_nativeMovingCandidates.clear();
+#endif
             }
 
+#ifdef ALLEGIANCE_NATIVE
+            phase(5);
+#endif
             //Sort the collisions by the time they occur
             m_collisions.sort(0);
 
@@ -319,6 +394,9 @@ void        CclusterIGC::Update(Time now)
 
                 m_collisions.purge();
             }
+#ifdef ALLEGIANCE_NATIVE
+            phase(6);
+#endif
             {
                 //Apply any damage from mines
                 //Kids always follow parents in the ship list, so go from back to front
@@ -337,28 +415,57 @@ void        CclusterIGC::Update(Time now)
 
             //Move each object & projectile
             {
+#ifdef ALLEGIANCE_NATIVE
+                for(size_t i=m_nativeModels.size();i>0;){--i;auto* model=m_nativeModels[i];if(!model)continue;
+                    if(m_nativeModelTypes[i]==OT_projectile)static_cast<CprojectileIGC*>(model)->CprojectileIGC::Move();
+                    else model->Move();
+                }
+#else
                 for (ModelLinkIGC*  l = m_models.first();
                      (l != NULL);
                      l = l->next())
                 {
-                    l->data()->Move();
+                    auto* model=l->data();
+                        model->Move();
                 }
+#endif
             }
 
+#ifdef ALLEGIANCE_NATIVE
+            phase(7);
+#endif
             if ((m_nPass++) % c_nPassesPerUpdate == 0)
             {
+#ifdef ALLEGIANCE_NATIVE
+                m_pClusterSite->BeginVisibilityScan();
+                // Reverse pickable order is the original model-list subset,
+                // without walking thousands of shots with no side visibility.
+                // Unusual attributes retain the original scan below.
+                if(!m_nativeFullVisibilityScan){
+                    for(auto* l=m_modelsPickable.last();l;l=l->txen())
+                        if(l->data()->GetAttributes()&c_mtSeenBySide)l->data()->UpdateSeenBySide();
+                }else
+#endif
+                {
                 for (ModelLinkIGC*  l = m_models.first();
                      (l != NULL);
                      l = l->next())
                 {
                     l->data()->UpdateSeenBySide();
                 }
+                }
 
+#ifdef ALLEGIANCE_NATIVE
+                m_pClusterSite->EndVisibilityScan();
+#endif
                 m_pMission->GetIgcSite()->ClusterUpdateEvent(this);
             }
         }
 
 
+#ifdef ALLEGIANCE_NATIVE
+        phase(8);
+#endif
         //Draw and resolve any explosions
         if (m_nExplosions != 0)
         {
@@ -480,6 +587,9 @@ void        CclusterIGC::Update(Time now)
             m_nExplosions = 0;
         }
 
+#ifdef ALLEGIANCE_NATIVE
+        phase(9);
+#endif
         m_lastUpdate = now;
     }
 }
@@ -499,6 +609,10 @@ int        CclusterIGC::Export(void*  data) const
 
 void        CclusterIGC::AddModel(ImodelIGC* modelNew)
 {
+#ifdef ALLEGIANCE_NATIVE
+    if((modelNew->GetAttributes()&(c_mtSeenBySide|c_mtNotPickable))==(c_mtSeenBySide|c_mtNotPickable))RequireFullVisibilityScan();
+    if(!(modelNew->GetAttributes()&c_mtNotPickable) && modelNew->GetObjectType()!=OT_buoy){m_dodgeIndex.invalidate();m_shipDodgeIndex.invalidate();}
+#endif
     assert (modelNew);
 
     ZVerify(m_models.first(modelNew));
@@ -533,11 +647,19 @@ void        CclusterIGC::AddModel(ImodelIGC* modelNew)
             ht->SetDeadF(false);
 
         ZRetailAssert(!ht->GetDeadF());
+#ifdef ALLEGIANCE_NATIVE
+        auto handle=AddNativeModel(modelNew);
+        m_modelLinks.emplace(modelNew,NativeModelLinks{{m_models.first(),(mt&c_mtNotPickable)?nullptr:m_modelsPickable.last(),(mt&c_mtCastRay)?m_modelsCastRay.last():nullptr},handle});
+#endif
     }
 }
 
 void        CclusterIGC::DeleteModel(ImodelIGC* modelOld)
 {
+#ifdef ALLEGIANCE_NATIVE
+    DeleteNativeModel(modelOld);
+    if(!(modelOld->GetAttributes()&c_mtNotPickable) && modelOld->GetObjectType()!=OT_buoy){m_dodgeIndex.invalidate();m_shipDodgeIndex.invalidate();}
+#endif
     assert (modelOld);
 
     {
@@ -547,12 +669,22 @@ void        CclusterIGC::DeleteModel(ImodelIGC* modelOld)
 
         if ((mt & c_mtNotPickable) == 0)
         {
+
+#ifdef ALLEGIANCE_NATIVE
+            RemoveModelLink(&m_modelsPickable,modelOld,1);
+#else
             DeleteIbaseIGC((BaseListIGC*)&m_modelsPickable, modelOld);
+#endif
         }
 
         if (mt & c_mtCastRay)
         {
+
+#ifdef ALLEGIANCE_NATIVE
+            RemoveModelLink(&m_modelsCastRay,modelOld,2);
+#else
             DeleteIbaseIGC((BaseListIGC*)&m_modelsCastRay, modelOld);
+#endif
         }
 
         if (mt & c_mtHitable)
@@ -569,7 +701,15 @@ void        CclusterIGC::DeleteModel(ImodelIGC* modelOld)
 
     m_pClusterSite->DeleteThingSite(modelOld->GetThingSite());
 
-    DeleteIbaseIGC((BaseListIGC*)&m_models, modelOld);
+
+#ifdef ALLEGIANCE_NATIVE
+            RemoveModelLink(&m_models,modelOld,0);
+#else
+            DeleteIbaseIGC((BaseListIGC*)&m_models, modelOld);
+#endif
+#ifdef ALLEGIANCE_NATIVE
+    m_modelLinks.erase(modelOld);
+#endif
 }
 
 ImodelIGC*  CclusterIGC::GetModel(const char* name) const
@@ -733,4 +873,3 @@ IbuildingEffectIGC*      CclusterIGC::CreateBuildingEffect(Time           now,
 
     return pbe;
 }
-
